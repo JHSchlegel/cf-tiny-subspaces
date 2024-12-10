@@ -19,6 +19,11 @@ conda activate cf
 pip install -r requirements.txt
 ```
 
+We moreover make use of the "hessian_eigenthings" package for computing the top-k eigenvectors of the Hessian in a scalable way. "hessian_eigenthings" can be installed by running
+```bash
+pip install --upgrade git+https://github.com/noahgolmant/pytorch-hessian-eigenthings.git@master#egg=hessian-eigenthings
+```
+
 ## Source Code Structure
 ```bash
 ├── configs
