@@ -20,8 +20,15 @@ from torch.optim.sgd import SGD
 from typing import List, Optional, Tuple, Callable
 import torch.nn as nn
 import numpy as np
+import os
+import sys
 
 from hessian_eigenthings.lanczos import lanczos
+
+sys.path.append(os.path.abspath('../'))
+from utils import HVPOperator
+
+
 
 # =========================================================================== #
 #                            Test for Orthonormality                          #
@@ -67,6 +74,7 @@ class SubspaceSGD(SGD):
     def __init__(
         self,
         model: nn.Module,
+        criterion: nn.modules.loss._Loss,
         k: int,
         max_lanczos_steps: int = 50,
         lr: float = 1e-3,
@@ -83,6 +91,8 @@ class SubspaceSGD(SGD):
             model (nn.Module): Model whose parameters are optimized.
             k (int): Number of top-k eigenvalues and eigenvectors of the Hessian
                 to compute.
+            criterion (nn.modules.loss._Loss): Loss function that is used for 
+                calculation of the Hessian.
             max_lanczos_steps (int, optional): Maximum number of steps allowed in
                 Lanczos' method for computing the top-k eigenvectors and eigenvalues.
                 Note that if there was no convergence (up to some tolerance)
@@ -105,7 +115,8 @@ class SubspaceSGD(SGD):
             weight_decay=weight_decay,
             nesterov=nesterov,
         )
-
+        
+        self.criterion = criterion  # loss function
         num_params = sum(p.numel() for p in model.parameters())
         # device used for creating new tensors
         self.device = next(model.parameters()).device
@@ -113,7 +124,7 @@ class SubspaceSGD(SGD):
         self.eigenvectors = torch.zeros(
             (k, num_params), dtype=torch.float32, device=self.device
         )
-        self.eigenvalues = numpy.zeros(k, dtype=np.float32)
+        self.eigenvalues = np.zeros(k, dtype=np.float32)
         self.model = model
         # number of top-k eigenvectors to compute
         self.k = k
@@ -214,15 +225,15 @@ class SubspaceSGD(SGD):
         """
         use_gpu = True if self.device.type == "cuda" else False
         hvp_operator = HVPOperator(
-            self.model,
-            data_batch,
-            criterion,
+            model=self.model,
+            data_source=data_batch,
+            criterion=self.criterion,
             use_gpu=use_gpu,
             full_dataset=False,
         )
         self.eigenvalues, self.eigenvectors = lanczos(
-            hvp_operator,
-            self.k,
+            operator=hvp_operator,
+            num_eigenthings=self.k,
             use_gpu=use_gpu,
             fp16=fp16,
             max_steps=self.max_lanczos_steps,
