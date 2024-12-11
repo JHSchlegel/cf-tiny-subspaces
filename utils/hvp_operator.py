@@ -3,15 +3,20 @@
 # Original author(s): [Noah Golmant, Zhewei Yao, Amir Gholami, Michael Mahoney, Joseph Gonzalez]
 # License: MIT (see LICENSES-hessian-eigenthings)
 # Changes made:
-# - replaced dataloader wihth data_source when initializing the class to allow for both dataloader and tuple of current batch data
+# - replaced dataloader wihth data_source when initializing the class to allow 
+#       for both dataloader and tuple of current batch data
 # - adapted the _prepare_grad() method to handle both dataloader and tuple of current batch data
-
+# - added comment sections for "Packages and Presets" and
+#       "Hessian Vector Product Operator" for better readability
 
 
 """
 This module defines a linear operator to compute the hessian-vector product
 for a given pytorch model using subsampled data.
 """
+# =========================================================================== #
+#                            Packages and Presets                             #
+# =========================================================================== #
 from typing import Callable, Union, Tuple
 
 
@@ -24,7 +29,9 @@ import hessian_eigenthings.utils as utils
 
 from hessian_eigenthings.operator import Operator
 
-
+# =========================================================================== #
+#                      Hessian Vector Product Operator                        #
+# =========================================================================== #
 class HVPOperator(Operator):
     """
     Use PyTorch autograd for Hessian Vec product calculation
