@@ -1,9 +1,9 @@
 # This file is derived from "hvp_operator.py" from pytorch-hessian-eigenthings
 # Original file: https://github.com/noahgolmant/pytorch-hessian-eigenthings/blob/master/hessian_eigenthings/hvp_operator.py
-# Original author(s): [Noah Golmant, Zhewei Yao, Amir Gholami, Michael Mahoney, Joseph Gonzalez]
+# Original authors: [Noah Golmant, Zhewei Yao, Amir Gholami, Michael Mahoney, Joseph Gonzalez]
 # License: MIT (see LICENSES-hessian-eigenthings)
 # Changes made:
-# - replaced dataloader wihth data_source when initializing the class to allow 
+# - replaced dataloader wihth data_source when initializing the class to allow
 #       for both dataloader and tuple of current batch data
 # - adapted the _prepare_grad() method to handle both dataloader and tuple of current batch data
 # - added comment sections for "Packages and Presets" and
@@ -29,6 +29,7 @@ import hessian_eigenthings.utils as utils
 
 from hessian_eigenthings.operator import Operator
 
+
 # =========================================================================== #
 #                      Hessian Vector Product Operator                        #
 # =========================================================================== #
@@ -36,7 +37,7 @@ class HVPOperator(Operator):
     """
     Use PyTorch autograd for Hessian Vec product calculation
     model:  PyTorch network to compute hessian for
-    data_source: either a pytorch dataloader or a tuple of the data input and targets 
+    data_source: either a pytorch dataloader or a tuple of the data input and targets
     of the current batch, that we get examples from to compute grads
     loss:   Loss function to descend (e.g. F.cross_entropy)
     use_gpu: use cuda or not
@@ -63,13 +64,12 @@ class HVPOperator(Operator):
         self.full_dataset = full_dataset
 
         self.is_dataloader = isinstance(data_source, data.DataLoader)
-        
+
         self.criterion = criterion
         self.use_gpu = use_gpu
         self.fp16 = fp16
         self.max_possible_gpu_samples = max_possible_gpu_samples
-        
-        
+
         assert self.is_dataloader or isinstance(
             data_source, (tuple, list)
         ), "data_source must be of type tuple (list also works) or torch.utils.data.DataLoader"
@@ -83,12 +83,10 @@ class HVPOperator(Operator):
         else:
             self.batch_inputs, self.batch_targets = data_source
             # check whether input and target have the same number of samples:
-            assert (
-                self.batch_inputs.size(0) == self.batch_targets.size(0)
+            assert self.batch_inputs.size(0) == self.batch_targets.size(
+                0
             ), "Input and target must have the same number of samples"
             self.full_dataset = False  # Override full_dataset when using single batch
-
-
 
     def apply(self, vec: torch.Tensor):
         """
