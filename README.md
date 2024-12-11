@@ -4,6 +4,7 @@
 1. [Contributors](#contributors)
 2. [Setup](#setup)
 3. [Source Code Structure](#source-code-structure)
+4. [Licenses](#licenses)
 
 ## Contributors
 - Rufat Asadli (22-953-632)
@@ -54,3 +55,6 @@ pip install --upgrade git+https://github.com/noahgolmant/pytorch-hessian-eigenth
     ├── metrics.py
     └── plotting.py
 ```
+
+## Licenses
+The file `utils/hvp_operator.py` is an adapted version of the implementation of the Hessian-vector product operator from the "hessian_eigenthings" package. The original implementation can be found [here](https://github.com/noahgolmant/pytorch-hessian-eigenthings/blob/master/hessian_eigenthings/hvp_operator.py). The corresponding licence that is used for this file is a copy of the original license of the "hessian_eigenthings" package and is named `LICENSE-hessian-eigenthings`. For details about the adaptions we made to the original implementation, please to the comment header of the file `utils/hvp_operator.py`.
