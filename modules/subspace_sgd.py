@@ -17,9 +17,8 @@ notebook in the notebooks folder.
 # =========================================================================== #
 import torch
 from torch.optim.sgd import SGD
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 import torch.nn as nn
-from numpy import np.ndarray
 import numpy as np
 
 from hessian_eigenthings.lanczos import lanczos
@@ -60,6 +59,9 @@ class SubspaceSGD(SGD):
     """
     SGD optimizer that can project gradients onto the orthonormal space
     spanned by the top-k eigenvectors of the Hessian or its orthogonal complement.
+    The _flatten_grad() and _unflatten_grad() methods were inspired by the gather_flat_grad()
+    and _add_grad() methods in the source code of the PyTorch LBFGS optimizer class
+    which can be accessed here: https://github.com/pytorch/pytorch/blob/main/torch/optim/lbfgs.py
     """
 
     def __init__(
@@ -135,6 +137,8 @@ class SubspaceSGD(SGD):
         """
         Flatten and concatenate gradients from all parameters. This prepares
         the gradients for projection onto subspaces through matrix-vector products.
+        this method was inspired by the gather_flat_grad() of the LBFGS optimizer
+        in the PyTorch source code; see: https://github.com/pytorch/pytorch/blob/main/torch/optim/lbfgs.py
 
         Returns:
             torch.Tensor: Flattened gradient tensor of all parameters
@@ -154,7 +158,8 @@ class SubspaceSGD(SGD):
         """
         Replace parameter gradients by gradient data from the (projected)
         flattened gradient tensor. Finally, reshape the parameter gradients 
-        to their original shape.
+        to their original shape. This method was inspired by the _add_grad() of the LBFGS optimizer
+        in the PyTorch source code; see: https://github.com/pytorch/pytorch/blob/main/torch/optim/lbfgs.py
 
         Args:
             flat_grad (torch.Tensor): tensor of flattened (and possibly projected) gradients
