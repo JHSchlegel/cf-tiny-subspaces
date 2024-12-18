@@ -5,17 +5,17 @@ from typing import Optional, Dict, Any
 
 
 def setup_wandb(
+    dir: Optional[str],
     project: str = "ETHZ AS2024 Deep Learning/cf-tiny-subspaces",
-    name: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None
 ) -> None:
     """
     Setup Weights & Biases logging.
     
     Args:
-        project: Name of the wandb project
-        name: Name of the run (optional)
-        config: Configuration dictionary (optional)
+        dir (Optional[str]): W&B logging directory
+        project (str): Name of the wandb project
+        config (Optional[Dict[str, Any]]): Configuration dictionary (optional)
     """
     load_dotenv()
     
@@ -28,8 +28,8 @@ def setup_wandb(
     
     if wandb.run is None:
         wandb.init(
+            dir=dir,
             project=project,
-            name=name,
             config=config
         )
 
