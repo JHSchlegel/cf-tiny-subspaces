@@ -1,108 +1,84 @@
+import os
 import torch
 import torch.nn as nn
-import argparse
-import yaml
+import warnings
 from pathlib import Path
-import logging
-from torch.utils.data import DataLoader
 
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 from modules.CLTrainer import CLTrainer
-from utils.wandb_utils import setup_wandb
 from modules.mlp import MLP
 from modules.cnn import CNN
 from modules.subspace_sgd import SubspaceSGD
+from utils.data_utils import get_data_loaders
+from utils.model_utils import get_model
 
+# Ignore annoying hydra warnings
+warnings.filterwarnings("ignore")
 
-
-def train_and_evaluate(config_path: str):
+@hydra.main(
+    config_path="../configs/model", 
+    config_name="trainer",  
+    version_base=None
+)
+def main(config: DictConfig) -> None:
     """
-    Main training and evaluation function.
+    Main training function with Hydra configuration.
     
     Args:
-        config_path: Path to the config.yaml file of MLP/CNN
+        config: Hydra configuration object containing all parameters
     """
-    #TODO config.yaml?
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
+    # Save directory is automatically managed by Hydra
+    save_dir = Path(os.getcwd())
+    print(f"Saving results to {save_dir}")
 
-    #TODO standard logger. maybe change
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
+    # Get data loaders
+    train_loader, test_loader = get_data_loaders(config.data)
 
-    #TODO Dataloader
-    train_loader, test_loader = get_data_loaders(config)
-
-    #TODO Do we get the model from config.yaml?
-    model = get_model(config)
+    # Initialize model
+    model = get_model(config.model)
+    
+    # Initialize optimizer
     optimizer = SubspaceSGD(
         model.parameters(),
-        **config['optimizer']['params']
+        **OmegaConf.to_container(config.optimizer, resolve=True)
     )
+    
+    # Initialize loss function
     criterion = nn.CrossEntropyLoss()
 
-    # Call the trainer
+    # Initialize trainer
     trainer = CLTrainer(
         model=model,
         optimizer=optimizer,
         criterion=criterion,
-        epoch=config['training']['n_epochs'],
-        log_interval=config['training']['log_interval'],
-        subspace_type=config['training']['subspace_type'],
-        setup_wandb=config['wandb']['enabled'],
-        device=config['training'].get('device', 'cuda')
+        save_dir=str(save_dir),
+        epoch=config.training.n_epochs,
+        log_interval=config.training.log_interval,
+        subspace_type=config.training.subspace_type,
+        setup_wandb=config.wandb.enabled,
+        wandb_project=config.wandb.get('project', None),
+        wandb_config=OmegaConf.to_container(config, resolve=True),
+        device=config.training.get('device', 'cuda'),
+        eval_freq=config.training.get('eval_freq', 1)
     )
 
-    # Training loop. Note that for the first epoch standard SGD is applied 
-    best_accuracy = 0.0
-    for epoch in range(config['training']['n_epochs']):
-        # Train one step
-        train_loss, train_acc, train_time, eigenvalues = trainer.step(
+    try:
+        # Train and evaluate
+        train_losses, train_accuracies, final_eval_loss, final_eval_acc, eigenvalues = trainer.train_and_evaluate(
             train_loader=train_loader,
-            epoch=epoch
+            test_loader=test_loader
         )
 
-        logging.info(f"Epoch {epoch+1}/{config['training']['n_epochs']}")
-        logging.info(f"Training - Loss: {train_loss:.4f}, Accuracy: {train_acc:.2f}%")
-
-        # Evaluation
-        if (epoch + 1) % config['training']['eval_freq'] == 0:
-            eval_acc, eval_loss = trainer.evaluate(
-                test_loader=test_loader,
-                prefix='eval'
-            )
-            
-            logging.info(f"Evaluation - Loss: {eval_loss:.4f}, Accuracy: {eval_acc:.2f}%")
-
-            # Save best model
-            if eval_acc > best_accuracy:
-                best_accuracy = eval_acc
-                save_path = Path(config['training']['checkpoint_dir']) / 'best_model.pt'
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'accuracy': best_accuracy,
-                    'config': config
-                }, save_path)
-                logging.info(f"Saved best model with accuracy: {best_accuracy:.2f}%")
-
-
-def main():
-    try:
-        #TODO get the config.
-        train_and_evaluate(config)
+        print(f"Training completed. Final test accuracy: {final_eval_acc:.2f}%")
+        
     except Exception as e:
-        logging.error(f"Training failed: {str(e)}")
+        print(f"Training failed: {str(e)}")
         raise
+    finally:
+        # Clean up GPU memory
+        torch.cuda.empty_cache()
 
 if __name__ == "__main__":
     main()
-
-
-#TODO
-# 1. Additional metrics; e.g., to quantify forgetting
-# 2. Fix Wandb or some more logging
-# 3. Eigenvalues can be used efficiently. here we just call them

@@ -34,6 +34,7 @@ class CLTrainer:
         save_dir: str,
         epoch: int,
         log_interval: int,
+        eval_freq: int,
         seed: int = 42,
         subspace_type: Optional[str] = None,
         scheduler: Optional[optim.lr_scheduler._LRScheduler] = None,
@@ -53,6 +54,7 @@ class CLTrainer:
             save_dir: Directory path to save models and visualizations
             epoch: Number of epochs for training
             log_interval: Interval for logging metrics during training
+            eval_freq: Frequency of evaluation on the test set
             seed: Random seed for reproducibility
             subspace_type: Type of subspace projection ("bulk" or "dominant")
             scheduler: Learning rate scheduler
@@ -72,6 +74,7 @@ class CLTrainer:
         self.save_dir = Path(save_dir)
         self.epoch = epoch
         self.log_interval = log_interval
+        self.eval_freq = eval_freq
         self.subspace_type = subspace_type
         self.device = device
 
@@ -212,7 +215,7 @@ class CLTrainer:
         # Track time for evaluation
         eval_start_time = time.time()
 
-        pbar = tqdm(test_loader, desc='Evaluating')
+        pbar = tqdm(test_loader, desc='Evaluating...')
         for data, target in pbar:
             data, target = data.to(self.device), target.to(self.device)
             
@@ -256,6 +259,59 @@ class CLTrainer:
 
         return accuracy, avg_loss
     
+    def train_and_evaluate(
+            self,
+            train_loader: DataLoader,
+            test_loader: DataLoader
+    ) -> Tuple[List[float], List[float], float, float, List[List[torch.Tensor]]]:
+        """
+        Main training and evaluation function.
+        
+        Args:
+            train_loader (torch.utils.data.DataLoader): The training loader.
+            test_loader (torch.utils.data.DataLoader): The test loader.
+        """
+        logging.info(f"Starting training for subspace type: {self.subspace_type}")
+
+        train_losses = []
+        train_accuracies = []
+        top_k_eigenvalues = []
+        best_accuracy = 0.0
+
+        for epoch in range(self.epoch):
+            # Train step
+            epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list = self.step(
+                train_loader=train_loader,
+                epoch=epoch
+            )
+            
+            train_losses.append(epoch_loss)
+            train_accuracies.append(epoch_accuracy)
+            top_k_eigenvalues.append(eigenvalues_list)
+
+            logging.info(f"\nEpoch {epoch} Summary:")
+            logging.info(f"Average Loss: {epoch_loss:.6f}")
+            logging.info(f"Accuracy: {epoch_accuracy:.2f}%")
+            logging.info(f"Time taken: {epoch_time:.2f}s")
+
+            # Evaluate on test set
+            if (epoch + 1) % self.eval_freq == 0:
+                eval_acc, eval_loss = self.evaluate(test_loader)
+                
+                if eval_acc > best_accuracy:
+                    best_accuracy = eval_acc
+                    self._save_checkpoint(epoch)
+
+        final_eval_acc, final_eval_loss = self.evaluate(test_loader)
+        
+        return (
+            train_losses, 
+            train_accuracies, 
+            final_eval_loss, 
+            final_eval_acc, 
+            top_k_eigenvalues
+        )
+
     def _save_checkpoint(self, epoch: int) -> None:
         """
         Save the model checkpoint.
