@@ -14,17 +14,18 @@ import sys
 import wandb
 
 from utils.wandb_utils import setup_wandb
-
+from utils.reproducibility import set_all_seeds
+from utils.data_utils.continual_dataset import ContinualDataset
 
 
 class CLTrainer:
     """
-    Subspace-restricted Trainer implementation in Continual Learning setting that supports 
+    Subspace-restricted Trainer implementation in Continual Learning setting that supports
     training with externally configured optimizers. This class provides comprehensive
     training, evaluation, and metric tracking capabilities integrated with wandb logging.
     """
 
-    VALID_SUBSPACE_TYPES = {'bulk', 'dominant', None}   
+    VALID_SUBSPACE_TYPES = {"bulk", "dominant", None}
 
     def __init__(
         self,
@@ -32,14 +33,16 @@ class CLTrainer:
         optimizer: optim.Optimizer,
         criterion: nn.Module,
         save_dir: str,
-        epoch: int,
+        num_tasks: int,
+        num_epochs: int,
         log_interval: int,
         eval_freq: int,
+        checkpoint_freq: int = 10,
         seed: int = 42,
         subspace_type: Optional[str] = None,
         scheduler: Optional[optim.lr_scheduler._LRScheduler] = None,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        setup_wandb: bool = True,   
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        use_wandb: bool = True,
         wandb_log_dir: Optional[str] = None,
         wandb_project: Optional[str] = None,
         wandb_config: Optional[Dict] = None,
@@ -52,29 +55,34 @@ class CLTrainer:
             optimizer: Custom-built subspace optimizer
             criterion: Loss function used for training
             save_dir: Directory path to save models and visualizations
-            epoch: Number of epochs for training
+            num_tasks: Number of tasks in the continual learning setting
+            num_epochs: Number of epochs for training
             log_interval: Interval for logging metrics during training
             eval_freq: Frequency of evaluation on the test set
+            checkpoint_freq: Frequency of saving model checkpoints
             seed: Random seed for reproducibility
             subspace_type: Type of subspace projection ("bulk" or "dominant")
             scheduler: Learning rate scheduler
             device: Device to run computations on
-            setup_wandb: Whether to initialize wandb logging
+            use_wandb: Whether to initialize wandb logging
             wandb_log_dir: Logging directory for weights and biases
             wandb_project: Project name of weights and biases
             wandb_config: Configs used for run; saved in weights and biases
         """
         if subspace_type not in self.VALID_SUBSPACE_TYPES:
-            raise ValueError(f"subspace_type must be one of {self.VALID_SUBSPACE_TYPES}")
+            raise ValueError(
+                f"subspace_type must be one of {self.VALID_SUBSPACE_TYPES}"
+            )
 
         self.model = model.to(device)
         self.optimizer = optimizer
         self.criterion = criterion
         self.scheduler = scheduler
         self.save_dir = Path(save_dir)
-        self.epoch = epoch
+        self.num_epochs = num_epochs
         self.log_interval = log_interval
         self.eval_freq = eval_freq
+        self.checkpoint_freq = checkpoint_freq
         self.subspace_type = subspace_type
         self.device = device
 
@@ -83,21 +91,21 @@ class CLTrainer:
         (self.save_dir / "models").mkdir(exist_ok=True)
 
         # Set seed
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
-                
-        self.setup_wandb: bool = setup_wandb
-        if setup_wandb:
-            setup_wandb(
-                dir=wandb_log_dir,
-                project=wandb_project,
-                config=wandb_config
-            )
+        set_all_seeds(seed)
+
+        self.setup_wandb: bool = use_wandb
+        if self.setup_wandb:
+            setup_wandb(dir=wandb_log_dir, project=wandb_project, config=wandb_config)
 
         logging.basicConfig(level=logging.INFO)
-        
-    def step(
+
+        self.num_tasks = num_tasks
+
+        # initialize per task accuracies and losses for the test set:
+        self.test_accuracies = {i: [] for i in range(self.num_tasks)}
+        self.test_losses = {i: [] for i in range(self.num_tasks)}
+
+    def _train_epoch(
         self,
         train_loader: DataLoader,
         epoch: int,
@@ -130,7 +138,7 @@ class CLTrainer:
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
-            
+
             loss.backward()
 
             # Use the custom built optimizer. We pass a standard optimization
@@ -138,13 +146,11 @@ class CLTrainer:
             self.optimizer.step(
                 data_batch=(data, target),
                 fp16=False,
-                subspace_type=None if epoch==0 else self.subspace_type
+                subspace_type=None if epoch == 0 else self.subspace_type,
             )
 
-            # Track eigenvalues
-            if self.subspace_type:
-                eigenvalues, _ = self.optimizer.eigenthings
-                eigenvalues_list.append(eigenvalues)
+            eigenvalues, _ = self.optimizer.eigenthings
+            eigenvalues_list.append(eigenvalues)
 
             # Calculate accuracy
             pred = output.argmax(dim=1, keepdim=True)
@@ -156,8 +162,8 @@ class CLTrainer:
             if batch_idx % self.log_interval == 0:
                 current_progress = batch_idx * len(data)
                 total_samples = len(train_loader.dataset)
-                progress_percentage = 100. * batch_idx / len(train_loader)
-                
+                progress_percentage = 100.0 * batch_idx / len(train_loader)
+
                 logging.info(
                     f"Train Epoch: {epoch} [{current_progress}/{total_samples} "
                     f"({progress_percentage:.0f}%)]\t"
@@ -171,145 +177,166 @@ class CLTrainer:
 
         # Log epoch metrics
         if wandb.run:
-            wandb.log({
-                'train/epoch_loss': epoch_loss,
-                'train/epoch_accuracy': epoch_accuracy,
-                'train/epoch_time': epoch_time,
-                'train/epoch': epoch
-            })
+            wandb.log(
+                {
+                    "train/epoch_loss": epoch_loss,
+                    "train/epoch_accuracy": epoch_accuracy,
+                    "train/epoch_time": epoch_time,
+                    "train/epoch": epoch,
+                }
+            )
 
             # Log eigenvalue statistics
             if eigenvalues_list:
                 last_eigenvalues = eigenvalues_list[-1]
-                wandb.log({
-                    'train/top_eigenvalue': last_eigenvalues[0],
-                    'train/eigenvalue_ratio': last_eigenvalues[0] / last_eigenvalues[-1],
-                    'train/epoch': epoch
-                })
+                wandb.log(
+                    {
+                        "train/top_eigenvalue": last_eigenvalues[0],
+                        "train/eigenvalue_ratio": last_eigenvalues[0]
+                        / last_eigenvalues[-1],
+                        "train/epoch": epoch,
+                    }
+                )
 
-        return epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list    
+        return epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list
 
     @torch.no_grad()
-    def evaluate(
+    def _evaluate_seen_tasks(
         self,
-        test_loader: DataLoader,
-        prefix: str = 'eval',
+        test_loaders: Dict[int, DataLoader],
+        prefix: str = "eval",
     ) -> Tuple[float, float]:
         """
         Evaluate the model's performance on a test dataset and log metrics to wandb.
-        
+
         Args:
-            test_loader (DataLoader): DataLoader containing the test/validation data
+            test_loaders (Dict[int, DataLoader]): Dictionary of task ids and
+                test loaders for each task
             prefix (str, optional): Prefix for wandb logging keys. Defaults to 'eval'.
-        
+
         Returns:
             Tuple containing:
                 float: Model accuracy as a percentage
                 float: Average loss value across all test samples
         """
         self.model.eval()
-        total_loss = 0
-        correct = 0
-        total_samples = 0
-        
-        # Track time for evaluation
-        eval_start_time = time.time()
+        accuracies = {}
+        avg_losses = {}
+        eval_times = {}
+        total_samples = {}
 
-        pbar = tqdm(test_loader, desc='Evaluating...')
-        for data, target in pbar:
-            data, target = data.to(self.device), target.to(self.device)
-            
-            output = self.model(data)
-            loss = self.criterion(output, target)
-            
-            # Accumulate loss
-            total_loss += loss.item() * data.size(0)
-            
-            # Calculate accuracy
-            pred = output.argmax(dim=1, keepdim=True)
-            correct += torch.sum(pred.eq(target.view_as(pred))).item()
-            total_samples += data.size(0)
-            
-            # Update progress bar
-            current_acc = 100. * correct / total_samples
-            current_loss = total_loss / total_samples
-            pbar.set_postfix({
-                f'{prefix}/loss': f'{current_loss:.4f}',
-                f'{prefix}/acc': f'{current_acc:.2f}%'
-            })
+        for task_id, task_test_loader in test_loaders.items():
+            total_loss = 0
+            correct = 0
+            total_samples[task_id] = 0
 
-        # Calculate final metrics
-        eval_time = time.time() - eval_start_time
-        avg_loss = total_loss / total_samples
-        accuracy = 100. * correct / total_samples
-        
-        # Log metrics to wandb
-        if wandb.run:
-            wandb.log({
-                f'{prefix}/loss': avg_loss,
-                f'{prefix}/accuracy': accuracy,
-                f'{prefix}/eval_time': eval_time,
-                f'{prefix}/samples': total_samples
-            })
-        
-        print(f"\nEvaluation Summary:")
-        print(f"Accuracy: {accuracy:.2f}%")
-        print(f"Average Loss: {avg_loss:.4f}")
-        print(f"Evaluation Time: {eval_time:.2f}s")
+            # Track time for evaluation
+            eval_start_time = time.time()
 
-        return accuracy, avg_loss
-    
+            pbar = tqdm(task_test_loader, desc=f"Evaluating Task {task_id}...")
+            for data, target in pbar:
+                data, target = data.to(self.device), target.to(self.device)
+
+                output = self.model(data)
+                loss = self.criterion(output, target)
+
+                # Accumulate loss
+                total_loss += loss.item() * data.size(0)
+
+                # Calculate accuracy
+                pred = output.argmax(dim=1, keepdim=True)
+                correct += torch.sum(pred.eq(target.view_as(pred))).item()
+                total_samples[task_id] += data.size(0)
+
+                # Update progress bar
+                current_acc = 100.0 * correct / total_samples[task_id]
+                current_loss = total_loss / total_samples[task_id]
+                pbar.set_postfix(
+                    {
+                        f"{prefix}/loss": f"{current_loss:.4f}",
+                        f"{prefix}/acc": f"{current_acc:.2f}%",
+                    }
+                )
+
+            # Calculate final metrics
+            eval_times[task_id] = time.time() - eval_start_time
+            avg_losses[task_id] = total_loss / total_samples[task_id]
+            accuracies[task_id] = 100.0 * correct / total_samples[task_id]
+
+            # Log metrics to wandb
+            if wandb.run:
+                wandb.log(
+                    {
+                        f"{prefix}/task_{task_id}_loss": avg_losses[task_id],
+                        f"{prefix}/task_{task_id}_accuracy": accuracies[task_id],
+                        f"{prefix}/task_{task_id}_eval_time": eval_times[task_id],
+                        f"{prefix}/task_{task_id}_samples": total_samples[task_id],
+                    }
+                )
+
+            logging.info(
+                f"\nEvaluation Summary: Task {task_id}\n"
+                f"Accuracy: {accuracies[task_id]:.2f}%\n"
+                f"Average Loss: {avg_losses[task_id]:.4f}\n"
+                f"Evaluation Time: {eval_times[task_id]:.2f}s"
+            )
+
+        return accuracies, avg_losses
+
     def train_and_evaluate(
-            self,
-            train_loader: DataLoader,
-            test_loader: DataLoader
+        self, cl_dataset: ContinualDataset
     ) -> Tuple[List[float], List[float], float, float, List[List[torch.Tensor]]]:
         """
         Main training and evaluation function.
-        
+
         Args:
-            train_loader (torch.utils.data.DataLoader): The training loader.
-            test_loader (torch.utils.data.DataLoader): The test loader.
+            cl_dataset (ContinualDataset): Continual learning dataset object that
+                provides data in a sequential manner.
         """
         logging.info(f"Starting training for subspace type: {self.subspace_type}")
 
-        train_losses = []
-        train_accuracies = []
-        top_k_eigenvalues = []
-        best_accuracy = 0.0
+        train_losses = {i: [] for i in range(self.num_tasks)}
+        train_accuracies = {i: [] for i in range(self.num_tasks)}
+        top_k_eigenvalues = {i: [] for i in range(self.num_tasks)}
 
-        for epoch in range(self.epoch):
-            # Train step
-            epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list = self.step(
-                train_loader=train_loader,
-                epoch=epoch
-            )
-            
-            train_losses.append(epoch_loss)
-            train_accuracies.append(epoch_accuracy)
-            top_k_eigenvalues.append(eigenvalues_list)
+        for task_id in range(self.num_tasks):
+            train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
 
-            logging.info(f"\nEpoch {epoch} Summary:")
-            logging.info(f"Average Loss: {epoch_loss:.6f}")
-            logging.info(f"Accuracy: {epoch_accuracy:.2f}%")
-            logging.info(f"Time taken: {epoch_time:.2f}s")
+            for epoch in range(self.num_epochs):
+                # Train step
+                epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list = (
+                    self._train_epoch(train_loader=train_loader, epoch=epoch)
+                )
 
-            # Evaluate on test set
-            if (epoch + 1) % self.eval_freq == 0:
-                eval_acc, eval_loss = self.evaluate(test_loader)
-                
-                if eval_acc > best_accuracy:
-                    best_accuracy = eval_acc
+                train_losses[task_id].append(epoch_loss)
+                train_accuracies[task_id].append(epoch_accuracy)
+                top_k_eigenvalues[task_id].append(eigenvalues_list)
+
+                logging.info(f"\nEpoch {epoch} Summary:")
+                logging.info(f"Average Loss: {epoch_loss:.6f}")
+                logging.info(f"Accuracy: {epoch_accuracy:.2f}%")
+                logging.info(f"Time taken: {epoch_time:.2f}s")
+
+                # Evaluate on test set
+                if (epoch + 1) % self.eval_freq == 0:
+                    eval_acc, eval_loss = self._evaluate_seen_tasks(test_loaders)
+                if (epoch + 1) % self.checkpoint_freq == 0:
                     self._save_checkpoint(epoch)
 
-        final_eval_acc, final_eval_loss = self.evaluate(test_loader)
-        
+            test_accs_current, test_avg_losses_current = self._evaluate_seen_tasks(
+                test_loaders
+            )
+            # append the test accuracies and losses for the current task:
+            for id in range(task_id + 1):
+                self.test_accuracies[id].append(test_accs_current.get(id, 0))
+                self.test_losses[id].append(test_avg_losses_current[id])
+
         return (
-            train_losses, 
-            train_accuracies, 
-            final_eval_loss, 
-            final_eval_acc, 
-            top_k_eigenvalues
+            train_losses,
+            train_accuracies,
+            self.test_accuracies,
+            self.test_losses,
+            top_k_eigenvalues,
         )
 
     def _save_checkpoint(self, epoch: int) -> None:
@@ -322,10 +349,14 @@ class CLTrainer:
         try:
             save_path = self.save_dir / "models" / f"model_{epoch}.pt"
             checkpoint = {
-                'epoch': epoch,
-                'model_state_dict': self.model.state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
-                'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
+                "epoch": epoch,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": (
+                    self.scheduler.state_dict() if self.scheduler else None
+                ),
+                "test_accuracies": self.test_accuracies,
+                "test_losses": self.test_losses,
             }
             torch.save(checkpoint, save_path)
             logging.info(f"Checkpoint saved: {save_path}")
@@ -342,10 +373,12 @@ class CLTrainer:
         """
         try:
             checkpoint = torch.load(checkpoint_path)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            if self.scheduler and checkpoint['scheduler_state_dict']:
-                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            self.model.load_state_dict(checkpoint["model_state_dict"])
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            if self.scheduler and checkpoint["scheduler_state_dict"]:
+                self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            self.test_accuracies = checkpoint["test_accuracies"]
+            self.test_losses = checkpoint["test_losses"]
             logging.info(f"Checkpoint loaded: {checkpoint_path}")
         except Exception as e:
             logging.error(f"Failed to load checkpoint: {str(e)}")
