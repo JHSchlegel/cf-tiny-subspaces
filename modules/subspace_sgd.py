@@ -276,15 +276,17 @@ class SubspaceSGD(SGD):
             "bulk",
         ], "Invalid subspace type, should be None, 'dominant' or 'bulk'"
 
-        # if not standard SGD, project gradient onto subspace
+        # if not standard SGD: flatten gradients to allow for matrix-vector products;
         if subspace_type:
-
-            # Flatten gradients to allow for matrix-vector products
             flat_grad = self._flatten_grad()
 
-            # Update eigenvectors/ eigenbasis that will be used for projection
-            self._update_eigenvectors(data_batch, fp16=fp16)
+        # Update eigenvectors/ eigenbasis that will be used for projection
+        # uses zero_grad internally, hence cannot just interchange order of
+        # flat_grad and update_eigenvectors
+        self._update_eigenvectors(data_batch, fp16=fp16)
 
+        # if not standard SGD, project gradient onto subspace
+        if subspace_type:
             # Project gradient
             projected_grad = self._project_gradient(
                 flat_grad, subspace_type=subspace_type
