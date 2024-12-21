@@ -45,6 +45,7 @@ class MLP(nn.Module):
         Returns:
             torch.Tensor: Output tensor.
         """
+        x = x.view(x.size(0), -1)
         x = self.relu(self.hidden1(x))
         x = self.relu(self.hidden2(x))
         x = self.output(x)
