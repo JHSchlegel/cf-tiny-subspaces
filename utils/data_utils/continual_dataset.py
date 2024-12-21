@@ -35,7 +35,7 @@ class ContinualDataset(ABC):
         # set seeds for reproducibility:
         self.rng = np.random.default_rng(seed)
 
-        self.train_loader = {}
+        self.train_loaders = {}
         self.test_loaders = {}
 
     @abstractmethod
@@ -72,6 +72,6 @@ class ContinualDataset(ABC):
                 and a dictionary of test dataloaders for all tasks seen so far.
         """
         return (
-            self.train_loader[task_id],
+            self.train_loaders[task_id],
             {id: self.test_loaders[id] for id in range(task_id + 1)},
         )
