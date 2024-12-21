@@ -18,7 +18,7 @@ from utils.data_utils.permuted_mnist import PermutedMNIST
 warnings.filterwarnings("ignore")
 
 
-@hydra.main(config_path="../configs", config_name="permuted_mnist", version_base=None)
+@hydra.main(config_path="../configs", config_name="permuted_mnist")
 def main(config: DictConfig) -> None:
     """
     Main training function with Hydra configuration.
@@ -27,7 +27,7 @@ def main(config: DictConfig) -> None:
         config: Hydra configuration object containing all parameters
     """
     # Save directory is automatically managed by Hydra
-    save_dir = Path(os.getcwd())
+    save_dir = f"{os.getcwd()}/"
     print(f"Saving results to {save_dir}")
 
     # Create permuted MNIST dataset:
