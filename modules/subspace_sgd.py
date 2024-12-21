@@ -25,19 +25,20 @@ import sys
 
 from hessian_eigenthings.lanczos import lanczos
 
-sys.path.append(os.path.abspath('../'))
+sys.path.append(os.path.abspath("../"))
 from utils import HVPOperator
-
 
 
 # =========================================================================== #
 #                            Test for Orthonormality                          #
 # =========================================================================== #
 # function for sanity checks for calculated eigenvectors before projecting gradients
-def is_orthonormal_basis(matrix: np.ndarray, device: torch.device, tol:float=1e-6) -> bool:
+def is_orthonormal_basis(
+    matrix: np.ndarray, device: torch.device, tol: float = 1e-6
+) -> bool:
     """
     Check if the rows of a matrix form an orthonormal basis.
-    
+
     Args:
         matrix (np.ndarray): 2D array of shape (k, num_params) i.e. want to check
             if rows span an orthonormal basis. Hereby, k is the number of basis vectors
@@ -48,15 +49,14 @@ def is_orthonormal_basis(matrix: np.ndarray, device: torch.device, tol:float=1e-
     Returns:
         bool: True if the matrix forms an orthonormal basis, False otherwise.
     """
-    # since matrix M has shape (k, num_params) we need to calculate M * M^T 
+    # since matrix M has shape (k, num_params) we need to calculate M * M^T
     # instead of typically M^T * M to check for orthonormality
-    matrix =torch.from_numpy(matrix).float().to(device)
+    matrix = torch.from_numpy(matrix).float().to(device)
     product_matrix = torch.mm(matrix, matrix.T)
-    
+
     # Check if the dot product matrix is close to the identity matrix
     identity = torch.eye(matrix.size(0), dtype=matrix.dtype, device=device)
     return torch.allclose(product_matrix, identity, atol=tol)
-
 
 
 # =========================================================================== #
@@ -84,20 +84,20 @@ class SubspaceSGD(SGD):
         nesterov: bool = False,
     ):
         """
-        Initialize an instance of the SubspaceSGD optimizer that inherits from 
-        the PyTorch SGD optimizer. 
-        
+        Initialize an instance of the SubspaceSGD optimizer that inherits from
+        the PyTorch SGD optimizer.
+
         Args:
             model (nn.Module): Model whose parameters are optimized.
             k (int): Number of top-k eigenvalues and eigenvectors of the Hessian
                 to compute.
-            criterion (nn.modules.loss._Loss): Loss function that is used for 
+            criterion (nn.modules.loss._Loss): Loss function that is used for
                 calculation of the Hessian.
             max_lanczos_steps (int, optional): Maximum number of steps allowed in
                 Lanczos' method for computing the top-k eigenvectors and eigenvalues.
                 Note that if there was no convergence (up to some tolerance)
                 within max_lanczos_steps, an error will be raised. Defaults to 50.
-            lr (float, optional): Learning rate that will be used in the 
+            lr (float, optional): Learning rate that will be used in the
                 SGD optimizer for the gradient updates. Defaults to 1e-3.
             momentum (float, optional): SGD Momentum factor. Defaults to 0.0.
             dampening (float, optional): SGD dampening for momentum. Defaults to 0.0.
@@ -105,7 +105,7 @@ class SubspaceSGD(SGD):
             nesterov (bool, optional): Whether Nesterov momentum should be enabled.
                 Defaults to False.
         """
-        
+
         # initialize SGD optimizer
         super().__init__(
             model.parameters(),
@@ -115,7 +115,7 @@ class SubspaceSGD(SGD):
             weight_decay=weight_decay,
             nesterov=nesterov,
         )
-        
+
         self.criterion = criterion  # loss function
         num_params = sum(p.numel() for p in model.parameters())
         # device used for creating new tensors
@@ -130,7 +130,7 @@ class SubspaceSGD(SGD):
         self.k = k
         # maximum number of Lanczos steps for calculation of the eigenbasis
         self.max_lanczos_steps = max_lanczos_steps
-        
+
     @property
     def eigenthings(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -141,7 +141,7 @@ class SubspaceSGD(SGD):
                 as separate numpy arrays.
         """
         return self.eigenvalues, self.eigenvectors.cpu().numpy()
-    
+
     # this method was inspired by the gather_flat_grad() of the LBFGS optimizer
     # in the PyTorch source code; see: https://github.com/pytorch/pytorch/blob/main/torch/optim/lbfgs.py
     def _flatten_grad(self) -> torch.Tensor:
@@ -162,13 +162,13 @@ class SubspaceSGD(SGD):
                     grad_list.append(p.grad.data.view(-1))
 
         return torch.cat(grad_list)
-    
+
     # this method was inspired by the _add_grad() of the LBFGS optimizer
     # in the PyTorch source code; see: https://github.com/pytorch/pytorch/blob/main/torch/optim/lbfgs.py
     def _unflatten_grad(self, flat_grad: torch.Tensor) -> None:
         """
         Replace parameter gradients by gradient data from the (projected)
-        flattened gradient tensor. Finally, reshape the parameter gradients 
+        flattened gradient tensor. Finally, reshape the parameter gradients
         to their original shape. This method was inspired by the _add_grad() of the LBFGS optimizer
         in the PyTorch source code; see: https://github.com/pytorch/pytorch/blob/main/torch/optim/lbfgs.py
 
@@ -194,7 +194,7 @@ class SubspaceSGD(SGD):
 
         Args:
             flat_grad (torch.Tensor): Flattened gradient tensor
-            subspace_type (Optional[str], optional): Type of subspace to 
+            subspace_type (Optional[str], optional): Type of subspace to
                 project onto (None or "dominant" or "bulk"). Defaults to None.
 
         Returns:
@@ -220,8 +220,8 @@ class SubspaceSGD(SGD):
         Update the top-k eigenvectors of the Hessian using the given/current data batch.
 
         Args:
-            data_batch: Tuple of input and target tensors
-            fp16: Whether to use FP16 precision for computation
+            data_batch (Tuple[torch.Tensor, torch.Tensor]): Tuple of input and target tensors
+            fp16 (bool, optional): Whether to use half precision for the eigenthings
         """
         use_gpu = True if self.device.type == "cuda" else False
         hvp_operator = HVPOperator(
@@ -238,9 +238,9 @@ class SubspaceSGD(SGD):
             fp16=fp16,
             max_steps=self.max_lanczos_steps,
         )
-        
+
         assert is_orthonormal_basis(
-            matrix = self.eigenvectors, device = self.device, tol=1e-4
+            matrix=self.eigenvectors, device=self.device, tol=1e-4
         ), "Eigenvectors are not orthonormal"
         self.eigenvectors = torch.from_numpy(self.eigenvectors).to(self.device)
 
@@ -254,11 +254,11 @@ class SubspaceSGD(SGD):
         """
         Performs a single SGD optimization step with gradient projected onto a
         subspace as specified in 'subspace_type'.
-        
+
         Args:
             closure (Optional[Callable[[], float]], optional): _description_. Defaults to None.
             data_batch (Optional[Tuple[torch.Tensor, torch.Tensor]], optional):
-                Tuple of input and target tensors of the current batch. 
+                Tuple of input and target tensors of the current batch.
                 Is used for calcuation of the Hessian and its eigenthings.
                 Defaults to None.
             fp16 (bool, optional): _description_. Defaults to False.
@@ -275,16 +275,18 @@ class SubspaceSGD(SGD):
             "dominant",
             "bulk",
         ], "Invalid subspace type, should be None, 'dominant' or 'bulk'"
-        
+
+        # if not standard SGD: flatten gradients to allow for matrix-vector products;
+        if subspace_type:
+            flat_grad = self._flatten_grad()
+
+        # Update eigenvectors/ eigenbasis that will be used for projection
+        # uses zero_grad internally, hence cannot just interchange order of
+        # flat_grad and update_eigenvectors
+        self._update_eigenvectors(data_batch, fp16=fp16)
+
         # if not standard SGD, project gradient onto subspace
         if subspace_type:
-
-            # Flatten gradients to allow for matrix-vector products
-            flat_grad = self._flatten_grad()
-            
-            # Update eigenvectors/ eigenbasis that will be used for projection
-            self._update_eigenvectors(data_batch, fp16=fp16)
-
             # Project gradient
             projected_grad = self._project_gradient(
                 flat_grad, subspace_type=subspace_type
