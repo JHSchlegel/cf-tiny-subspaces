@@ -177,25 +177,19 @@ class CLTrainer:
 
         # Log epoch metrics
         if wandb.run:
+            last_eigenvalues = eigenvalues_list[-1]
             wandb.log(
                 {
                     "train/epoch_loss": epoch_loss,
                     "train/epoch_accuracy": epoch_accuracy,
                     "train/epoch_time": epoch_time,
                     "train/epoch": epoch,
-                }
-            )
-
-            # Log eigenvalue statistics
-            if eigenvalues_list:
-                last_eigenvalues = eigenvalues_list[-1]
-                wandb.log(
-                    {
-                        "train/top_eigenvalue": last_eigenvalues[0],
-                        "train/eigenvalue_ratio": last_eigenvalues[0]
-                        / last_eigenvalues[-1],
-                        "train/epoch": epoch,
-                    }
+                    "train/top_eigenvalue": last_eigenvalues[0],
+                    "train/eigenvalue_ratio": last_eigenvalues[0]   
+                    / last_eigenvalues[-1],
+                    "train/epoch": epoch,
+                    },
+                    commit = False # commit only once at the end of the epoch to avoid multiple steps
                 )
 
         return epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list
@@ -204,6 +198,8 @@ class CLTrainer:
     def _evaluate_seen_tasks(
         self,
         test_loaders: Dict[int, DataLoader],
+        epoch: int=0, 
+        log_to_wandb: bool = True,
         prefix: str = "eval",
     ) -> Tuple[float, float]:
         """
@@ -212,6 +208,8 @@ class CLTrainer:
         Args:
             test_loaders (Dict[int, DataLoader]): Dictionary of task ids and
                 test loaders for each task
+            epoch (int, optional): Current epoch number for evaluation. Defaults to 0.
+            log_to_wandb (bool, optional): If wandb runs, whether or not to log metrics to wandb. Defaults to True.
             prefix (str, optional): Prefix for wandb logging keys. Defaults to 'eval'.
 
         Returns:
@@ -264,14 +262,16 @@ class CLTrainer:
             accuracies[task_id] = 100.0 * correct / total_samples[task_id]
 
             # Log metrics to wandb
-            if wandb.run:
+            if wandb.run and log_to_wandb:
                 wandb.log(
                     {
+                        f"{prefix}/epoch": epoch,
                         f"{prefix}/task_{task_id}_loss": avg_losses[task_id],
                         f"{prefix}/task_{task_id}_accuracy": accuracies[task_id],
                         f"{prefix}/task_{task_id}_eval_time": eval_times[task_id],
                         f"{prefix}/task_{task_id}_samples": total_samples[task_id],
-                    }
+                    },
+                    commit = False # commit only once at the end of the epoch to avoid multiple steps
                 )
 
             logging.info(
@@ -301,6 +301,8 @@ class CLTrainer:
 
         for task_id in range(self.num_tasks):
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
+            
+            logging.info(f"Training on Task {task_id}...")
 
             for epoch in range(self.num_epochs):
                 # Train step
@@ -312,19 +314,24 @@ class CLTrainer:
                 train_accuracies[task_id].append(epoch_accuracy)
                 top_k_eigenvalues[task_id].append(eigenvalues_list)
 
-                logging.info(f"\nEpoch {epoch} Summary:")
+                logging.info(f"\nTask {task_id} Epoch {epoch} Summary:")
                 logging.info(f"Average Loss: {epoch_loss:.6f}")
                 logging.info(f"Accuracy: {epoch_accuracy:.2f}%")
                 logging.info(f"Time taken: {epoch_time:.2f}s")
 
                 # Evaluate on test set
                 if (epoch + 1) % self.eval_freq == 0:
-                    eval_acc, eval_loss = self._evaluate_seen_tasks(test_loaders)
+                    eval_acc, eval_loss = self._evaluate_seen_tasks(test_loaders, epoch)
                 if (epoch + 1) % self.checkpoint_freq == 0:
                     self._save_checkpoint(epoch)
+                    
+                
+                # commit only once at the end of the epoch to avoid multiple steps
+                if wandb.run:
+                    wandb.log({}, commit = True)
 
             test_accs_current, test_avg_losses_current = self._evaluate_seen_tasks(
-                test_loaders
+                test_loaders, log_to_wandb=False,
             )
             # append the test accuracies and losses for the current task:
             for id in range(task_id + 1):
