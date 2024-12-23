@@ -2,6 +2,7 @@ import time
 from tqdm import tqdm
 from typing import Tuple, Optional, Dict, List
 from pathlib import Path
+import pandas as pd
 
 import torch
 import torch.nn as nn
@@ -89,6 +90,8 @@ class CLTrainer:
         # Create directories to save checkpoints
         self.save_dir.mkdir(parents=True, exist_ok=True)
         (self.save_dir / "models").mkdir(exist_ok=True)
+        (self.save_dir / "visualizations").mkdir(exist_ok=True)
+        (self.save_dir / "metrics").mkdir(exist_ok=True)
 
         # Set seed
         set_all_seeds(seed)
@@ -109,6 +112,7 @@ class CLTrainer:
         self,
         train_loader: DataLoader,
         epoch: int,
+        first_task: bool = False,
     ) -> Tuple[float, float, float, List[torch.Tensor]]:
         """
         Train the model for one epoch with or without subspace projection.
@@ -116,6 +120,8 @@ class CLTrainer:
         Args:
             train_loader (DataLoader): DataLoader containing the current task's training data
             epoch (int): Current epoch number for training
+            first_task (bool, optional): Whether the current task is the first task;
+                if it is the first task, standard SGD will be used. Defaults to False.
 
         Returns:
             Tuple containing:
@@ -146,7 +152,7 @@ class CLTrainer:
             self.optimizer.step(
                 data_batch=(data, target),
                 fp16=False,
-                subspace_type=None if epoch == 0 else self.subspace_type,
+                subspace_type=None if first_task else self.subspace_type,
             )
 
             eigenvalues, _ = self.optimizer.eigenthings
@@ -307,7 +313,7 @@ class CLTrainer:
             for epoch in range(self.num_epochs):
                 # Train step
                 epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list = (
-                    self._train_epoch(train_loader=train_loader, epoch=epoch)
+                    self._train_epoch(train_loader=train_loader, epoch=epoch, first_task=task_id == 0)
                 )
 
                 train_losses[task_id].append(epoch_loss)
@@ -337,6 +343,15 @@ class CLTrainer:
             for id in range(task_id + 1):
                 self.test_accuracies[id].append(test_accs_current.get(id, 0))
                 self.test_losses[id].append(test_avg_losses_current[id])
+                
+        # save to csv as backup
+        self._save_metrics_to_csv(
+            train_losses,
+            train_accuracies,
+            self.test_losses,
+            self.test_accuracies,
+            top_k_eigenvalues,
+        )
 
         return (
             train_losses,
@@ -344,6 +359,84 @@ class CLTrainer:
             self.test_accuracies,
             self.test_losses,
             top_k_eigenvalues,
+        )
+    def _save_metrics_to_csv(
+        self,
+        train_losses: Dict[int, List[float]],
+        train_accuracies: Dict[int, List[float]],
+        test_losses: Dict[int, List[float]],
+        test_accuracies: Dict[int, List[float]],
+        top_k_eigenvalues: Dict[int, List[List[torch.Tensor]]],
+    ) -> None:
+        """
+        Save training and test metrics as well as eigenvalues to CSV files.
+
+        Args:
+            train_losses (Dict[int, List[float]]): Per-task training losses
+            train_accuracies (Dict[int, List[float]]): Per-task training accuracies
+            test_losses (Dict[int, List[float]]): Per-task test losses
+            test_accuracies (Dict[int, List[float]]): Per-task test accuracies
+            top_k_eigenvalues (Dict[int, List[List[torch.Tensor]]]): Per-task top-k eigenvalues
+                that were calculated during training for each batch for every epoch.
+        """
+        # prepare data for training metrics
+        train_data = []
+        test_data = []
+        eigenvalue_data = []
+                
+        for task_id in range(self.num_tasks):
+            for epoch in range(self.num_epochs):
+                # training metrics
+                if epoch < len(train_losses[task_id]):
+                    train_data.append({
+                        'task_id': task_id,
+                        'epoch': epoch,
+                        'loss': train_losses[task_id][epoch],
+                        'accuracy': train_accuracies[task_id][epoch]
+                    })
+                
+                # eigenvalues
+                if epoch < len(top_k_eigenvalues[task_id]):
+                    eigenvalues = top_k_eigenvalues[task_id][epoch]
+                    for batch_idx, eigen_value in enumerate(eigenvalues):
+                        eigenvalue_data.append({
+                            'task_id': task_id,
+                            'epoch': epoch,
+                            'batch_id': batch_idx,
+                            # reverse eigenvalues to have the largest eigenvalue first
+                            'value': eigen_value.item() if isinstance(eigen_value, torch.Tensor) else eigen_value[::-1]
+                        })
+            # test metrics
+            for evaluated_at_task in range(self.num_tasks):
+                if evaluated_at_task >= task_id:
+                    test_data.append({
+                        'task_id': task_id,
+                        'evaluated_at_task': evaluated_at_task,
+                        'loss': test_losses[task_id][evaluated_at_task-task_id],
+                        'accuracy': test_accuracies[task_id][evaluated_at_task-task_id]
+                    })
+                
+        
+        # create dataframes for saving
+        train_df = pd.DataFrame(train_data)
+        test_df = pd.DataFrame(test_data)
+        eigenvalue_df = pd.DataFrame(eigenvalue_data).explode("value")
+        # add eigenvalue_nr column
+        eigenvalue_df['eigenvalue_nr'] = eigenvalue_df.groupby(['task_id', 'epoch', 'batch_id']).cumcount() + 1
+        eigenvalue_df = eigenvalue_df.reset_index(drop=True)
+        
+        # save to csv
+        train_df.to_csv(
+            self.save_dir / "metrics" / "train_metrics.csv",
+            index=False
+        )
+        test_df.to_csv(
+            os.path.join(self.save_dir, "metrics/test_metrics.csv"),
+            index=False
+        )
+        eigenvalue_df.to_csv(
+            os.path.join(self.save_dir, "metrics/eigenvalues.csv"),
+            index=False
         )
 
     def _save_checkpoint(self, epoch: int) -> None:
