@@ -1,3 +1,12 @@
+""" 
+This module contains the implementation of a Trainer class suited for training 
+neural networks in a continual learning setting.
+"""
+
+
+# =========================================================================== #
+#                            Packages and Presets                             #
+# =========================================================================== #
 import time
 from tqdm import tqdm
 from typing import Tuple, Optional, Dict, List
@@ -19,6 +28,10 @@ from utils.reproducibility import set_all_seeds
 from utils.data_utils.continual_dataset import ContinualDataset
 
 
+
+# =========================================================================== #
+#                        Continual Learning Trainer                           #
+# =========================================================================== #
 class CLTrainer:
     """
     Subspace-restricted Trainer implementation in Continual Learning setting that supports
@@ -139,6 +152,8 @@ class CLTrainer:
         eigenvalues_list = []
 
         for batch_idx, (data, target) in enumerate(train_loader):
+            if batch_idx >2:
+                break
             data, target = data.to(self.device), target.to(self.device)
 
             self.optimizer.zero_grad()

@@ -2,6 +2,9 @@
 This module provides an abstract class for continual learning datasets.
 """
 
+# =========================================================================== #
+#                            Packages and Presets                             #
+# =========================================================================== #
 from abc import ABC, abstractmethod
 import numpy as np
 import torch
@@ -9,7 +12,9 @@ from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
 import random
 
-
+# =========================================================================== #
+#            An Abstract Class Dataset for Continual Learning                 #
+# =========================================================================== #
 class ContinualDataset(ABC):
     """
     Abstract base class for continual learning datasets.

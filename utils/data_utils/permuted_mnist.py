@@ -5,6 +5,9 @@ github repository, with the original Permutation class being available here:
 https://github.com/aimagelab/mammoth/blob/master/datasets/transforms/permutation.py#L9
 """
 
+# =========================================================================== #
+#                            Packages and Presets                             #
+# =========================================================================== #
 from .continual_dataset import ContinualDataset
 import numpy as np
 import torch
@@ -13,6 +16,9 @@ from torchvision import datasets, transforms
 from typing import List, Tuple, Dict, Optional, Iterator
 
 
+# =========================================================================== #
+#                         Permutation Transformation                          #
+# =========================================================================== #
 class PermutationTransform:
     """
     Custom transformation to permute the pixels of an image. Inspired by the
@@ -35,6 +41,10 @@ class PermutationTransform:
         return x.view(-1)[self.permutation].view(1, 28, 28)
 
 
+
+# =========================================================================== #
+#                          Permuted MNIST Dataset                             #
+# =========================================================================== #
 class PermutedMNIST(ContinualDataset):
     """
     Continual dataset class for the permuted MNIST dataset.

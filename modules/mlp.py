@@ -5,10 +5,16 @@ MLP class being available here:
 https://github.com/aimagelab/mammoth/blob/3d6fc4b0645734e5d8c416293efadc44f3032382/backbone/MNISTMLP.py#L13
 """
 
+# =========================================================================== #
+#                            Packages and Presets                             #
+# =========================================================================== #
 import torch.nn as nn
 import torch
 
 
+# =========================================================================== #
+#                            Multi-Layer Perceptron                           #
+# =========================================================================== #
 class MLP(nn.Module):
     """
     MLP composed of two hidden layers, each containing 100 ReLU activations. Inspired

@@ -1,3 +1,6 @@
+# =========================================================================== #
+#                            Packages and Presets                             #
+# =========================================================================== #
 import os
 import sys
 import torch
@@ -17,7 +20,9 @@ from utils.data_utils.permuted_mnist import PermutedMNIST
 # Ignore annoying hydra warnings
 warnings.filterwarnings("ignore")
 
-
+# =========================================================================== #
+#                          Main Training Function                             #
+# =========================================================================== #
 @hydra.main(config_path="../configs", config_name="permuted_mnist")
 def main(config: DictConfig) -> None:
     """
