@@ -83,7 +83,15 @@ def main(config: DictConfig) -> None:
 
     try:
         # Train and evaluate
-        train_losses, train_accuracies, test_accuracies, test_losses, eigenvalues = (
+        (
+            avg_accuracy, 
+            avg_max_forgetting, 
+            train_losses, 
+            train_accuracies, 
+            test_accuracies, 
+            test_losses, 
+            eigenvalues 
+        ) = (
             trainer.train_and_evaluate(pmnist)
         )
 

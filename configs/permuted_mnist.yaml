@@ -23,7 +23,7 @@ training:
   seed: 42
   num_epochs: 10
   log_interval: 10
-  subspace_type: null # "bulk"
+  subspace_type: null
   eval_freq: 1
   checkpoint_freq: 1
   device: "cuda:0"
@@ -34,5 +34,5 @@ wandb:
 
 hydra: 
   run:
-    dir: "${hydra:runtime.cwd}/../results/permuted_mnist/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}"
+    dir: "${hydra:runtime.cwd}/../results/permuted_mnist/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/hidden_dim-${model.hidden_dim}/lr-${optimizer.lr}/seed-${training.seed}"
 

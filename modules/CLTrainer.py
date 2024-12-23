@@ -306,13 +306,22 @@ class CLTrainer:
 
     def train_and_evaluate(
         self, cl_dataset: ContinualDataset
-    ) -> Tuple[List[float], List[float], float, float, List[List[torch.Tensor]]]:
+    ) -> Tuple[float, float, List[float], List[float], List[float], List[float], List[List[torch.Tensor]]]:
         """
         Main training and evaluation function.
 
         Args:
             cl_dataset (ContinualDataset): Continual learning dataset object that
                 provides data in a sequential manner.
+        Returns:
+            Tuple containing:
+                float: Average accuracy across all tasks
+                float: Average maximum forgetting across all tasks
+                Dict[int, List[float]]: Training losses for each task (epoch-wise)
+                Dict[int, List[float]]: Training accuracies for each task (epoch-wise)
+                Dict[int, List[float]]: Test accuracies for each task (epoch-wise)
+                Dict[int, List[float]]: Test losses for each task (epoch-wise)
+                Dict[int, List[List[torch.Tensor]]]: Top-k eigenvalues for each task (batch-wise)
         """
         logging.info(f"Starting training for subspace type: {self.subspace_type}")
 
@@ -360,7 +369,7 @@ class CLTrainer:
                 self.test_losses[id].append(test_avg_losses_current[id])
                 
         # save to csv as backup
-        self._save_metrics_to_csv(
+        average_accuracy, average_max_forgetting = self._save_metrics_to_csv(
             train_losses,
             train_accuracies,
             self.test_losses,
@@ -369,6 +378,8 @@ class CLTrainer:
         )
 
         return (
+            average_accuracy, 
+            average_max_forgetting,
             train_losses,
             train_accuracies,
             self.test_accuracies,
@@ -394,6 +405,9 @@ class CLTrainer:
             top_k_eigenvalues (Dict[int, List[List[torch.Tensor]]]): Per-task top-k eigenvalues
                 that were calculated during training for each batch for every epoch.
         """
+        # ------------------------------------------------------------------- #
+        #                       Log Metrics to CSV                            #
+        # ------------------------------------------------------------------- #
         # prepare data for training metrics
         train_data = []
         test_data = []
@@ -437,7 +451,7 @@ class CLTrainer:
         test_df = pd.DataFrame(test_data)
         eigenvalue_df = pd.DataFrame(eigenvalue_data).explode("value")
         # add eigenvalue_nr column
-        eigenvalue_df['eigenvalue_nr'] = eigenvalue_df.groupby(['task_id', 'epoch', 'batch_id']).cumcount() + 1
+        eigenvalue_df['eigenvalue_nr'] = eigenvalue_df.groupby(["task_id", "epoch", "batch_id"]).cumcount() + 1
         eigenvalue_df = eigenvalue_df.reset_index(drop=True)
         
         # save to csv
@@ -446,13 +460,66 @@ class CLTrainer:
             index=False
         )
         test_df.to_csv(
-            os.path.join(self.save_dir, "metrics/test_metrics.csv"),
+            self.save_dir/ "metrics/test_metrics.csv",
             index=False
         )
         eigenvalue_df.to_csv(
-            os.path.join(self.save_dir, "metrics/eigenvalues.csv"),
+            self.save_dir/"metrics/eigenvalues.csv",
             index=False
         )
+        
+        
+        # ------------------------------------------------------------------- #
+        #                          Average Accuracy                           #
+        # ------------------------------------------------------------------- #
+        # calculate average accuracy:
+        avg_accuracy = (
+            test_df
+            .query("evaluated_at_task == @self.num_tasks-1")["accuracy"]
+            .mean()
+        )
+        
+        # ------------------------------------------------------------------- #
+        #                     Average Maximum Forgetting                      #
+        # ------------------------------------------------------------------- #
+        # see e.g. https://arxiv.org/pdf/2010.11635 page 3
+        total_forgetting = 0.0
+        # For each task j (excluding the last task)
+        for j in range(self.num_tasks-1):
+            # get accuracies for task j
+            task_data = test_df.query("task_id == @j")
+            # get peak accuracy across all previous evaluations
+            peak_accuracy = task_data["accuracy"].max()
+                
+            # get the final accuracy a_{T,j}
+            final_accuracy = (
+                task_data
+                .query("evaluated_at_task == @self.num_tasks-1")["accuracy"]
+                .values[0]
+            )
+                        
+            # calculate forgetting for this task
+            forgetting = peak_accuracy - final_accuracy
+            total_forgetting += forgetting
+        
+        # Calculate average forgetting
+        avg_max_forgetting = total_forgetting / (self.num_tasks-1)
+        
+        # write to csv
+        forgetting_metrics = pd.DataFrame({
+            "average_accuracy": [avg_accuracy],
+            "average_forgetting": [avg_max_forgetting]
+        })
+        
+        forgetting_metrics.to_csv(
+            self.save_dir / "metrics" / "forgetting_metrics.csv",
+            index=False
+        )
+        
+        
+        return avg_accuracy, avg_max_forgetting
+        
+        
 
     def _save_checkpoint(self, epoch: int) -> None:
         """
