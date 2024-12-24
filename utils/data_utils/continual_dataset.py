@@ -35,8 +35,6 @@ class ContinualDataset(ABC):
         self.num_tasks = num_tasks
         self.seed = seed
 
-        self.current_task_id = 0
-
         # set seeds for reproducibility:
         self.rng = np.random.default_rng(seed)
 

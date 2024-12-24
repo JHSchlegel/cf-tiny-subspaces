@@ -50,10 +50,10 @@ class PermutedMNIST(ContinualDataset):
     Continual dataset class for the permuted MNIST dataset.
     """
 
-    def __init__(self, num_tasks, seed=42):
+    def __init__(self, num_tasks, seed:int=42)->None:
         super().__init__(num_tasks, seed)
 
-    def setup_tasks(self, batch_size, data_root="./data", num_workers=4) -> None:
+    def setup_tasks(self, batch_size:int, data_root:str="./data", num_workers:int=4) -> None:
         """
         Create training and test dataloaders for all tasks.
 
