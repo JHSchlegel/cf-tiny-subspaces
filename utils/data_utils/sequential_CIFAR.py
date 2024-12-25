@@ -5,7 +5,7 @@ from .continual_dataset import ContinualDataset
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader, Subset, ConcatDataset
-from torchvision import datasets, transforms, CIFAR100, CIFAR10
+from torchvision import datasets, transforms
 from PIL import Image
 from typing import List, Tuple, Dict, Optional, Iterator
 
@@ -39,11 +39,11 @@ class CL_CIFAR100(ContinualDataset):
             transforms.ToTensor(),
             transforms.Normalize(MEAN, STD)])
         transform_test = transforms.Compose(
-                transforms.ToTensor(), 
-                transforms.Normalize(MEAN, STD)
+                [transforms.ToTensor(), 
+                transforms.Normalize(MEAN, STD)]
             )
-        train_dataset = CIFAR100(data_root, train=True, download=True, transform=transform_train)
-        test_dataset = CIFAR100(data_root, train=False, download=True, transform=transform_test)
+        train_dataset = datasets.CIFAR100(data_root, train=True, download=True, transform=transform_train)
+        test_dataset = datasets.CIFAR100(data_root, train=False, download=True, transform=transform_test)
 
         for task_id in range(self.num_tasks):
             start_class = task_id * self.classes_per_task
@@ -101,11 +101,11 @@ class CL_CIFAR10(ContinualDataset):
             transforms.ToTensor(),
             transforms.Normalize(MEAN, STD)])
         transform_test = transforms.Compose(
-                transforms.ToTensor(), 
-                transforms.Normalize(MEAN, STD)
+                [transforms.ToTensor(), 
+                transforms.Normalize(MEAN, STD)]
             )
-        train_dataset = CIFAR10(data_root, train=True, download=True, transform=transform_train)
-        test_dataset = CIFAR10(data_root, train=False, download=True, transform=transform_test)
+        train_dataset = datasets.CIFAR10(data_root, train=True, download=True, transform=transform_train)
+        test_dataset = datasets.CIFAR10(data_root, train=False, download=True, transform=transform_test)
 
         for task_id in range(self.num_tasks):
             start_class = task_id * self.classes_per_task
