@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader, Subset, ConcatDataset
 from torchvision import datasets, transforms
 from PIL import Image
 from typing import List, Tuple, Dict, Optional, Iterator
+import warnings
 
 
 class CL_CIFAR100(ContinualDataset):
@@ -15,13 +16,13 @@ class CL_CIFAR100(ContinualDataset):
     Continual dataset class for the CIFAR-100 dataset
     """
 
-    def __init__(self, num_tasks, seed:int=42)->None:
+    def __init__(self, classes_per_task:int=10, num_tasks:int=10, seed:int=42)->None:
         super().__init__(num_tasks, seed)
 
-        self.classes_per_task = 100 // num_tasks 
-        self.class_order = np.arange(100)
-        self.rng.shuffle(self.class_order)
-    
+        assert num_tasks * classes_per_task <= 100, "Configuration of classes_per_task and num_tasks exceeds maximal number of classes available"
+        self.classes_per_task = classes_per_task
+        self.class_order = np.random.choice(100, size = num_tasks * self.classes_per_task, replace=False)
+
     def setup_tasks(self, batch_size:int, data_root:str="./data", num_workers:int=4) -> None:
         """
         Create training and test dataloaders for all tasks
@@ -77,12 +78,12 @@ class CL_CIFAR10(ContinualDataset):
     Continual dataset class for the CIFAR-100 dataset
     """
 
-    def __init__(self, num_tasks, seed:int=42)->None:
+    def __init__(self, classes_per_task:int=2, num_tasks:int=5, seed:int=42)->None:
         super().__init__(num_tasks, seed)
 
-        self.classes_per_task = 10 // num_tasks 
-        self.class_order = np.arange(10)
-        self.rng.shuffle(self.class_order)
+        assert num_tasks * classes_per_task <= 10, "Configuration of classes_per_task and num_tasks exceeds maximal number of classes available"       
+        self.classes_per_task = classes_per_task
+        self.class_order = np.random.choice(10, size = num_tasks * self.classes_per_task, replace=False)
     
     def setup_tasks(self, batch_size:int, data_root:str="./data", num_workers:int=4) -> None:
         """
