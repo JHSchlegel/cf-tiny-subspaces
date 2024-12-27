@@ -71,6 +71,7 @@ def main(config: DictConfig) -> None:
         num_epochs=config.training.num_epochs,
         log_interval=config.training.log_interval,
         eval_freq=config.training.get("eval_freq", 1),
+        num_subsamples_Hessian=config.training.get("num_subsamples_Hessian", 5_000),
         checkpoint_freq=config.training.get("checkpoint_freq", 10),
         seed=config.training.seed,
         subspace_type=config.training.subspace_type,

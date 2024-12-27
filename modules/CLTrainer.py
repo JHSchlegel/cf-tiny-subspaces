@@ -13,6 +13,7 @@ from typing import Tuple, Optional, Dict, List
 from pathlib import Path
 import pandas as pd
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -51,6 +52,7 @@ class CLTrainer:
         num_epochs: int,
         log_interval: int,
         eval_freq: int,
+        num_subsamples_Hessian: Optional[int] = 5_000,
         checkpoint_freq: int = 10,
         seed: int = 42,
         subspace_type: Optional[str] = None,
@@ -73,6 +75,10 @@ class CLTrainer:
             num_epochs: Number of epochs for training
             log_interval: Interval for logging metrics during training
             eval_freq: Frequency of evaluation on the test set
+            num_subsamples_Hessian: Number of samples of the train loader that will
+                be used for the Hessian (and eigenvalues/eigenvectors) computation.
+                If None, uses only the current batch instead of the subsampled 
+                train loader. Defaults to 5_000.
             checkpoint_freq: Frequency of saving model checkpoints
             seed: Random seed for reproducibility
             subspace_type: Type of subspace projection ("bulk" or "dominant")
@@ -116,11 +122,36 @@ class CLTrainer:
         logging.basicConfig(level=logging.INFO)
 
         self.num_tasks = num_tasks
+        self.num_subsamples_Hessian = num_subsamples_Hessian
 
         # initialize per task accuracies and losses for the test set:
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
+    
+    def _subsample_train_loader(
+        self,
+        train_loader: DataLoader, 
+    ) -> DataLoader:
+        """
+        Subsample the training data loader to a smaller size for receiving more precise
+        estimates of the Hessian and its eigenvalues whilst still being computationally
+        tractable.
+        
+        Args:
+            train_loader (DataLoader): Original train dataloader.
 
+        Returns:
+            DataLoader: Dataloader with subsampled data.
+        """
+        # heavily inspired by Giulia Lanzillotta's implementation
+        # # see https://github.com/GiuliaLanzillotta/mammoth/blob/99c01d216332ec4cb3c9123a887b777410415b8a/scripts/perturbations.py#L42
+        num_samples = min(len(train_loader.dataset), self.num_subsamples_Hessian)
+        logging.info(f"Subsampling training data to {num_samples} samples for Hessian calculation")
+        
+        random_indices = np.random.choice(list(range(num_samples)), size = num_samples, replace = False)
+        subdata = torch.utils.data.Subset(train_loader.dataset, random_indices)
+        return DataLoader(subdata, batch_size=32, shuffle=True, num_workers=4)
+    
     def _train_epoch(
         self,
         train_loader: DataLoader,
@@ -163,7 +194,10 @@ class CLTrainer:
             # Use the custom built optimizer. We pass a standard optimization
             # in the first epoch and perform gradient projection in later steps.
             self.optimizer.step(
-                data_batch=(data, target),
+                data_batch= (
+                    self._subsample_train_loader(train_loader) if 
+                    self.num_subsamples_Hessian else (data, target)
+                ),
                 fp16=False,
                 subspace_type=None if first_task else self.subspace_type,
             )

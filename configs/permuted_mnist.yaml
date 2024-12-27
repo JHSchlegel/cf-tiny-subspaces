@@ -23,10 +23,11 @@ training:
   seed: 42
   num_epochs: 10
   log_interval: 10
-  subspace_type: null
+  subspace_type: "bulk"
   eval_freq: 1
   checkpoint_freq: 1
   device: "cuda:0"
+  num_subsamples_Hessian: 5_000
 
 wandb:
   enabled: True
