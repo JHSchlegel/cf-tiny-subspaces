@@ -229,7 +229,7 @@ class SubspaceSGD(SGD):
             data_source=data_batch,
             criterion=self.criterion,
             use_gpu=use_gpu,
-            full_dataset=False,
+            full_dataset=True,
         )
         self.eigenvalues, self.eigenvectors = lanczos(
             operator=hvp_operator,

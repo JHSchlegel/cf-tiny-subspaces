@@ -148,9 +148,9 @@ class CLTrainer:
         num_samples = min(len(train_loader.dataset), self.num_subsamples_Hessian)
         logging.info(f"Subsampling training data to {num_samples} samples for Hessian calculation")
         
-        random_indices = np.random.choice(list(range(num_samples)), size = num_samples, replace = False)
+        random_indices = np.random.choice(list(range(len(train_loader.dataset))), size = num_samples, replace = False)
         subdata = torch.utils.data.Subset(train_loader.dataset, random_indices)
-        return DataLoader(subdata, batch_size=32, shuffle=True, num_workers=4)
+        return DataLoader(subdata, batch_size=128, shuffle=True, num_workers=4)
     
     def _train_epoch(
         self,
