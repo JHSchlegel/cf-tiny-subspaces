@@ -27,6 +27,7 @@ import wandb
 from utils.wandb_utils import setup_wandb
 from utils.reproducibility import set_all_seeds
 from utils.data_utils.continual_dataset import ContinualDataset
+from utils.metrics import compute_overlap
 
 
 
@@ -127,6 +128,21 @@ class CLTrainer:
         # initialize per task accuracies and losses for the test set:
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
+        
+        
+        self.calculate_next_top_k = self.optimizer.calculate_next_top_k
+                
+        
+        self.eigenvectors = {i: [] for i in range(self.num_tasks -1)}
+        self.eigenvectors_next_top_k = (
+            {i: [] for i in range(self.num_tasks -1)} if self.calculate_next_top_k 
+            else None
+        )
+        self.overlaps = {i: [] for i in range(self.num_tasks -1)} 
+        self.overlaps_next_top_k = (
+            {i: [] for i in range(self.num_tasks -1)} if self.calculate_next_top_k
+            else None
+        )
     
     def _subsample_train_loader(
         self,
@@ -156,6 +172,7 @@ class CLTrainer:
         self,
         train_loader: DataLoader,
         epoch: int,
+        task_id: int,
         first_task: bool = False,
     ) -> Tuple[float, float, float, List[torch.Tensor]]:
         """
@@ -164,6 +181,7 @@ class CLTrainer:
         Args:
             train_loader (DataLoader): DataLoader containing the current task's training data
             epoch (int): Current epoch number for training
+            task_id (int): Current task id
             first_task (bool, optional): Whether the current task is the first task;
                 if it is the first task, standard SGD will be used. Defaults to False.
 
@@ -184,7 +202,7 @@ class CLTrainer:
 
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(self.device), target.to(self.device)
-
+            
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
@@ -202,8 +220,50 @@ class CLTrainer:
                 subspace_type=None if first_task else self.subspace_type,
             )
 
-            eigenvalues, _ = self.optimizer.eigenthings
-            eigenvalues_list.append(eigenvalues)
+            eigenvalues, eigenvectors = self.optimizer.eigenthings
+            
+            if self.calculate_next_top_k:
+                eigenvalues_next_top_k, eigenvectors_next_top_k = self.optimizer.next_top_k_eigenthings
+            
+            eigenvalues_list.append(
+                np.concatenate([eigenvalues, eigenvalues_next_top_k], axis=0) if self.calculate_next_top_k 
+                else eigenvalues
+            )
+            
+            
+            if epoch == 0 and batch_idx == 0:
+                self.eigenvectors[task_id] = torch.from_numpy(eigenvectors).to(self.device)
+                if self.calculate_next_top_k:
+                    self.eigenvectors_next_top_k[task_id] = torch.from_numpy(eigenvectors_next_top_k).to(self.device)
+            
+            if self.calculate_next_top_k:
+                for id in range(min(self.num_tasks-1, task_id+1)):
+                    top_k_overlap = compute_overlap(
+                            self.eigenvectors[id],
+                            torch.from_numpy(eigenvectors).to(self.device),
+                        )
+                    self.overlaps[id].append(
+                        top_k_overlap
+                    )
+                    
+                    next_top_k_overlap = compute_overlap(
+                            self.eigenvectors_next_top_k[id],
+                            torch.from_numpy(eigenvectors_next_top_k).to(self.device),
+                        )
+                        
+                    self.overlaps_next_top_k[id].append(
+                        next_top_k_overlap
+                    )
+                    
+                    
+                    
+                    logging.info(
+                        f"Overlap between top-k eigenvectors of of first step of  task {id} and current step: {top_k_overlap}"
+                        f"Overlap between next top-k eigenvectors of first step of task {id} and current step: {next_top_k_overlap}"
+                    )
+                
+            
+            
 
             # Calculate accuracy
             pred = output.argmax(dim=1, keepdim=True)
@@ -227,6 +287,8 @@ class CLTrainer:
         epoch_time = time.time() - start_time
         epoch_loss /= len(train_loader)
         epoch_accuracy = 100.0 * correct / total
+        
+        del eigenvectors, eigenvectors_next_top_k
 
         # Log epoch metrics
         if wandb.run:
@@ -369,8 +431,9 @@ class CLTrainer:
             for epoch in range(self.num_epochs):
                 # Train step
                 epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list = (
-                    self._train_epoch(train_loader=train_loader, epoch=epoch, first_task=task_id == 0)
+                    self._train_epoch(train_loader=train_loader, epoch=epoch, first_task=task_id == 0, task_id=task_id)
                 )
+                
 
                 train_losses[task_id].append(epoch_loss)
                 train_accuracies[task_id].append(epoch_accuracy)
@@ -400,7 +463,7 @@ class CLTrainer:
                 self.test_accuracies[id].append(test_accs_current.get(id, 0))
                 self.test_losses[id].append(test_avg_losses_current[id])
                 
-        # save to csv as backup
+        # save to csv as backup 
         average_accuracy, average_max_forgetting = self._save_metrics_to_csv(
             train_losses,
             train_accuracies,
@@ -418,6 +481,7 @@ class CLTrainer:
             self.test_losses,
             top_k_eigenvalues,
         )
+    
     def _save_metrics_to_csv(
         self,
         train_losses: Dict[int, List[float]],
@@ -444,6 +508,8 @@ class CLTrainer:
         train_data = []
         test_data = []
         eigenvalue_data = []
+        
+        overlap_data = []
                 
         for task_id in range(self.num_tasks):
             for epoch in range(self.num_epochs):
@@ -476,12 +542,32 @@ class CLTrainer:
                         'loss': test_losses[task_id][evaluated_at_task-task_id],
                         'accuracy': test_accuracies[task_id][evaluated_at_task-task_id]
                     })
-                
+            
+            if self.calculate_next_top_k and task_id < self.num_tasks - 1:
+                for step, (overlap, overlap_next) in enumerate(zip(self.overlaps[task_id], self.overlaps_next_top_k[task_id])):
+                    overlap_data.append({
+                        'task_id': task_id,
+                        'step': step + task_id * self.num_epochs,
+                        'overlap': overlap,
+                        'overlap_next_top_k': overlap_next
+                    })
+                        
         
         # create dataframes for saving
         train_df = pd.DataFrame(train_data)
         test_df = pd.DataFrame(test_data)
         eigenvalue_df = pd.DataFrame(eigenvalue_data).explode("value")
+        
+        if self.calculate_next_top_k:
+            print(f"{overlap_data=}")
+            overlap_df = pd.DataFrame(overlap_data)
+            print(overlap_df)
+            overlap_df.to_csv(
+                self.save_dir / "metrics" / "overlaps.csv",
+                index=False
+            )
+            
+        
         # add eigenvalue_nr column
         eigenvalue_df['eigenvalue_nr'] = eigenvalue_df.groupby(["task_id", "epoch", "batch_id"]).cumcount() + 1
         eigenvalue_df = eigenvalue_df.reset_index(drop=True)
@@ -529,7 +615,6 @@ class CLTrainer:
                 .query("evaluated_at_task == @self.num_tasks-1")["accuracy"]
                 .values[0]
             )
-                        
             # calculate forgetting for this task
             forgetting = peak_accuracy - final_accuracy
             total_forgetting += forgetting
@@ -550,7 +635,6 @@ class CLTrainer:
         
         
         return avg_accuracy, avg_max_forgetting
-        
         
 
     def _save_checkpoint(self, epoch: int) -> None:

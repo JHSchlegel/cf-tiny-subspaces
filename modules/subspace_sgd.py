@@ -76,6 +76,7 @@ class SubspaceSGD(SGD):
         model: nn.Module,
         criterion: nn.modules.loss._Loss,
         k: int,
+        calculate_next_top_k: bool = False,
         max_lanczos_steps: int = 50,
         lr: float = 1e-3,
         momentum: float = 0.0,
@@ -91,6 +92,9 @@ class SubspaceSGD(SGD):
             model (nn.Module): Model whose parameters are optimized.
             k (int): Number of top-k eigenvalues and eigenvectors of the Hessian
                 to compute.
+            calculate_next_top_k (bool, optional): Whether to calculate the top-k and next top-k
+                eigenvalues and eigenvectors (i.e. 2k in total) or only the 
+                top-k. Defaults to False.
             criterion (nn.modules.loss._Loss): Loss function that is used for
                 calculation of the Hessian.
             max_lanczos_steps (int, optional): Maximum number of steps allowed in
@@ -120,14 +124,24 @@ class SubspaceSGD(SGD):
         num_params = sum(p.numel() for p in model.parameters())
         # device used for creating new tensors
         self.device = next(model.parameters()).device
+        
+        self.calculate_next_top_k = calculate_next_top_k
+        self.k = k
+        
         # reserve memory for eigenvectors and eigenvalues
         self.eigenvectors = torch.zeros(
             (k, num_params), dtype=torch.float32, device=self.device
         )
+        
+        self.eigenvectors_next_top_k = torch.zeros(
+            (k, num_params), dtype=torch.float32, device=self.device
+        ) if calculate_next_top_k else None
+        
         self.eigenvalues = np.zeros(k, dtype=np.float32)
+        self.eigenvalues_next_top_k = np.zeros(k, dtype=np.float32) if calculate_next_top_k else None
         self.model = model
         # number of top-k eigenvectors to compute
-        self.k = k
+   
         # maximum number of Lanczos steps for calculation of the eigenbasis
         self.max_lanczos_steps = max_lanczos_steps
 
@@ -141,6 +155,20 @@ class SubspaceSGD(SGD):
                 as separate numpy arrays.
         """
         return self.eigenvalues, self.eigenvectors.cpu().numpy()
+    
+    @property
+    def next_top_k_eigenthings(self) -> Tuple[np.ndarray, np.ndarray]:
+        """_summary_
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Returns next top-k eigenvalues and eigenvectors
+                as separate numpy arrays.
+        """
+        assert self.calculate_next_top_k, "Next top-k eigenthings were not calculated as calculate_next_top_k was set to False"
+        assert self.eigenvectors_next_top_k.shape[0] == self.k, "The next top-k eigenvectors consist of more than k eigenvectors"
+        
+                
+        return self.eigenvalues_next_top_k, self.eigenvectors_next_top_k
 
     # this method was inspired by the gather_flat_grad() of the LBFGS optimizer
     # in the PyTorch source code; see: https://github.com/pytorch/pytorch/blob/main/torch/optim/lbfgs.py
@@ -231,13 +259,19 @@ class SubspaceSGD(SGD):
             use_gpu=use_gpu,
             full_dataset=True,
         )
-        self.eigenvalues, self.eigenvectors = lanczos(
+        eigenvalues, eigenvectors = lanczos(
             operator=hvp_operator,
-            num_eigenthings=self.k,
+            num_eigenthings= 2 * self.k if self.calculate_next_top_k else self.k,
             use_gpu=use_gpu,
             fp16=fp16,
             max_steps=self.max_lanczos_steps,
         )
+        
+        self.eigenvalues = eigenvalues[:self.k] if self.calculate_next_top_k else eigenvalues
+        self.eigenvectors = eigenvectors[:self.k] if self.calculate_next_top_k else eigenvectors
+        
+        self.eigenvalues_next_top_k = eigenvalues[self.k:] if self.calculate_next_top_k else None
+        self.eigenvectors_next_top_k = eigenvectors[self.k:] if self.calculate_next_top_k else None
 
         assert is_orthonormal_basis(
             matrix=self.eigenvectors, device=self.device, tol=1e-4
