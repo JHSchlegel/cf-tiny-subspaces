@@ -4,12 +4,13 @@ data:
   num_tasks: 10
   data_root: "${hydra:runtime.cwd}/../data"
   num_workers: 4
-  batch_size: 128
+  batch_size: 32
 
 model:
-  input_dim: 3072 #3 * 32x32
+  in_channels: 3
+  image_size: 32
   hidden_dim: 100
-  output_dim: 10
+  output_dim: 100
 
 optimizer:
   lr: 0.01
@@ -23,7 +24,7 @@ optimizer:
 
 training:
   seed: 42
-  num_epochs: 2
+  num_epochs: 15 
   log_interval: 10
   subspace_type: "bulk"
   eval_freq: 1
