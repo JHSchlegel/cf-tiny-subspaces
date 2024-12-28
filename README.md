@@ -25,6 +25,13 @@ We moreover make use of the "hessian_eigenthings" package for computing the top-
 pip install --upgrade git+https://github.com/noahgolmant/pytorch-hessian-eigenthings.git@master#egg=hessian-eigenthings
 ```
 
+This repository includes the "hessian_eigenthings" as a submodule; after cloning, run the following commands at the root level of the main repository. 
+```bash 
+git submodule init 
+git submodule update
+```
+to initialize and update the submodule.
+
 ## Source Code Structure
 ```bash
 ├── configs
