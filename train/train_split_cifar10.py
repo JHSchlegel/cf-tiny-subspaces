@@ -13,7 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 
 sys.path.append(os.path.abspath("../"))
 from modules.CLTrainer import CLTrainer
-from modules.mlp import MLP
+from modules.cnn import CNN
 from modules.subspace_sgd import SubspaceSGD
 from utils.data_utils.sequential_CIFAR import CL_CIFAR10
 
@@ -47,8 +47,9 @@ def main(config: DictConfig) -> None:
     )
 
     # Initialize model
-    model = MLP(
-        input_dim=config.model.input_dim,
+    model = CNN(
+        in_channels=config.model.in_channels
+        image_size=config.model.image_size,
         output_dim=config.model.output_dim,
         hidden_dim=config.model.hidden_dim,
     )
