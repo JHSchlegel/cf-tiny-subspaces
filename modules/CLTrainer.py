@@ -3,7 +3,6 @@ This module contains the implementation of a Trainer class suited for training
 neural networks in a continual learning setting.
 """
 
-
 # =========================================================================== #
 #                            Packages and Presets                             #
 # =========================================================================== #
@@ -28,7 +27,6 @@ from utils.wandb_utils import setup_wandb
 from utils.reproducibility import set_all_seeds
 from utils.data_utils.continual_dataset import ContinualDataset
 from utils.metrics import compute_overlap
-
 
 
 # =========================================================================== #
@@ -78,7 +76,7 @@ class CLTrainer:
             eval_freq: Frequency of evaluation on the test set
             num_subsamples_Hessian: Number of samples of the train loader that will
                 be used for the Hessian (and eigenvalues/eigenvectors) computation.
-                If None, uses only the current batch instead of the subsampled 
+                If None, uses only the current batch instead of the subsampled
                 train loader. Defaults to 5_000.
             checkpoint_freq: Frequency of saving model checkpoints
             seed: Random seed for reproducibility
@@ -128,31 +126,32 @@ class CLTrainer:
         # initialize per task accuracies and losses for the test set:
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
-        
-        
+
         self.calculate_next_top_k = self.optimizer.calculate_next_top_k
-                
-        
-        self.eigenvectors = {i: [] for i in range(self.num_tasks -1)}
+
+        self.eigenvectors = {i: [] for i in range(self.num_tasks - 1)}
         self.eigenvectors_next_top_k = (
-            {i: [] for i in range(self.num_tasks -1)} if self.calculate_next_top_k 
+            {i: [] for i in range(self.num_tasks - 1)}
+            if self.calculate_next_top_k
             else None
         )
-        self.overlaps = {i: [] for i in range(self.num_tasks -1)} 
+        self.overlaps = {i: [] for i in range(self.num_tasks - 1)}
         self.overlaps_next_top_k = (
-            {i: [] for i in range(self.num_tasks -1)} if self.calculate_next_top_k
+            {i: [] for i in range(self.num_tasks - 1)}
+            if self.calculate_next_top_k
             else None
         )
-    
+
     def _subsample_train_loader(
         self,
-        train_loader: DataLoader, 
+        train_loader: DataLoader,
     ) -> DataLoader:
         """
         Subsample the training data loader to a smaller size for receiving more precise
         estimates of the Hessian and its eigenvalues whilst still being computationally
-        tractable.
-        
+        tractable. Heavily inspired by Giulia Lanzillotta's implementation
+        # see https://github.com/GiuliaLanzillotta/mammoth/blob/99c01d216332ec4cb3c9123a887b777410415b8a/scripts/perturbations.py#L42
+
         Args:
             train_loader (DataLoader): Original train dataloader.
 
@@ -160,14 +159,35 @@ class CLTrainer:
             DataLoader: Dataloader with subsampled data.
         """
         # heavily inspired by Giulia Lanzillotta's implementation
-        # # see https://github.com/GiuliaLanzillotta/mammoth/blob/99c01d216332ec4cb3c9123a887b777410415b8a/scripts/perturbations.py#L42
+        # see https://github.com/GiuliaLanzillotta/mammoth/blob/99c01d216332ec4cb3c9123a887b777410415b8a/scripts/perturbations.py#L42
         num_samples = min(len(train_loader.dataset), self.num_subsamples_Hessian)
-        logging.info(f"Subsampling training data to {num_samples} samples for Hessian calculation")
-        
-        random_indices = np.random.choice(list(range(len(train_loader.dataset))), size = num_samples, replace = False)
+        logging.info(
+            f"Subsampling training data to {num_samples} samples for Hessian calculation"
+        )
+
+        random_indices = np.random.choice(
+            list(range(len(train_loader.dataset))), size=num_samples, replace=False
+        )
         subdata = torch.utils.data.Subset(train_loader.dataset, random_indices)
-        return DataLoader(subdata, batch_size=128, shuffle=True, num_workers=4)
-    
+        logging.info(f"Finished subsampling training data")
+
+        # return a single tuple of subsampled data and targets; not a dataloader
+        # as pytorch hessian eigenthings has a huge overhead when using dataloaders
+        # instead of just the data and targets in the ARPACK routine
+        # Hence, we implemented our own logic in utils/hvp_operator.py for
+        # allowing the use of a single tuple of data and targets
+        return next(
+            iter(
+                DataLoader(
+                    subdata,
+                    batch_size=num_samples,
+                    shuffle=False,
+                    num_workers=0,
+                    pin_memory=False,
+                )
+            )
+        )
+
     def _train_epoch(
         self,
         train_loader: DataLoader,
@@ -202,7 +222,7 @@ class CLTrainer:
 
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(self.device), target.to(self.device)
-            
+
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
@@ -212,58 +232,56 @@ class CLTrainer:
             # Use the custom built optimizer. We pass a standard optimization
             # in the first epoch and perform gradient projection in later steps.
             self.optimizer.step(
-                data_batch= (
-                    self._subsample_train_loader(train_loader) if 
-                    self.num_subsamples_Hessian else (data, target)
+                data_batch=(
+                    self._subsample_train_loader(train_loader)
+                    if self.num_subsamples_Hessian
+                    else (data, target)
                 ),
                 fp16=False,
                 subspace_type=None if first_task else self.subspace_type,
             )
 
             eigenvalues, eigenvectors = self.optimizer.eigenthings
-            
+
             if self.calculate_next_top_k:
-                eigenvalues_next_top_k, eigenvectors_next_top_k = self.optimizer.next_top_k_eigenthings
-            
+                eigenvalues_next_top_k, eigenvectors_next_top_k = (
+                    self.optimizer.next_top_k_eigenthings
+                )
+
             eigenvalues_list.append(
-                np.concatenate([eigenvalues, eigenvalues_next_top_k], axis=0) if self.calculate_next_top_k 
+                np.concatenate([eigenvalues, eigenvalues_next_top_k], axis=0)
+                if self.calculate_next_top_k
                 else eigenvalues
             )
-            
-            
+
             if epoch == 0 and batch_idx == 0:
-                self.eigenvectors[task_id] = torch.from_numpy(eigenvectors).to(self.device)
+                self.eigenvectors[task_id] = torch.from_numpy(eigenvectors).to(
+                    self.device
+                )
                 if self.calculate_next_top_k:
-                    self.eigenvectors_next_top_k[task_id] = torch.from_numpy(eigenvectors_next_top_k).to(self.device)
-            
+                    self.eigenvectors_next_top_k[task_id] = torch.from_numpy(
+                        eigenvectors_next_top_k
+                    ).to(self.device)
+
             if self.calculate_next_top_k:
-                for id in range(min(self.num_tasks-1, task_id+1)):
+                for id in range(min(self.num_tasks - 1, task_id + 1)):
                     top_k_overlap = compute_overlap(
-                            self.eigenvectors[id],
-                            torch.from_numpy(eigenvectors).to(self.device),
-                        )
-                    self.overlaps[id].append(
-                        top_k_overlap
+                        self.eigenvectors[id],
+                        torch.from_numpy(eigenvectors).to(self.device),
                     )
-                    
+                    self.overlaps[id].append(top_k_overlap)
+
                     next_top_k_overlap = compute_overlap(
-                            self.eigenvectors_next_top_k[id],
-                            torch.from_numpy(eigenvectors_next_top_k).to(self.device),
-                        )
-                        
-                    self.overlaps_next_top_k[id].append(
-                        next_top_k_overlap
+                        self.eigenvectors_next_top_k[id],
+                        torch.from_numpy(eigenvectors_next_top_k).to(self.device),
                     )
-                    
-                    
-                    
+
+                    self.overlaps_next_top_k[id].append(next_top_k_overlap)
+
                     logging.info(
                         f"Overlap between top-k eigenvectors of of first step of  task {id} and current step: {top_k_overlap}"
                         f"Overlap between next top-k eigenvectors of first step of task {id} and current step: {next_top_k_overlap}"
                     )
-                
-            
-            
 
             # Calculate accuracy
             pred = output.argmax(dim=1, keepdim=True)
@@ -287,7 +305,7 @@ class CLTrainer:
         epoch_time = time.time() - start_time
         epoch_loss /= len(train_loader)
         epoch_accuracy = 100.0 * correct / total
-        
+
         del eigenvectors, eigenvectors_next_top_k
 
         # Log epoch metrics
@@ -300,12 +318,12 @@ class CLTrainer:
                     "train/epoch_time": epoch_time,
                     "train/epoch": epoch,
                     "train/top_eigenvalue": last_eigenvalues[0],
-                    "train/eigenvalue_ratio": last_eigenvalues[0]   
+                    "train/eigenvalue_ratio": last_eigenvalues[0]
                     / last_eigenvalues[-1],
                     "train/epoch": epoch,
-                    },
-                    commit = False # commit only once at the end of the epoch to avoid multiple steps
-                )
+                },
+                commit=False,  # commit only once at the end of the epoch to avoid multiple steps
+            )
 
         return epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list
 
@@ -313,7 +331,7 @@ class CLTrainer:
     def _evaluate_seen_tasks(
         self,
         test_loaders: Dict[int, DataLoader],
-        epoch: int=0, 
+        epoch: int = 0,
         log_to_wandb: bool = True,
         prefix: str = "eval",
     ) -> Tuple[float, float]:
@@ -386,7 +404,7 @@ class CLTrainer:
                         f"{prefix}/task_{task_id}_eval_time": eval_times[task_id],
                         f"{prefix}/task_{task_id}_samples": total_samples[task_id],
                     },
-                    commit = False # commit only once at the end of the epoch to avoid multiple steps
+                    commit=False,  # commit only once at the end of the epoch to avoid multiple steps
                 )
 
             logging.info(
@@ -398,9 +416,15 @@ class CLTrainer:
 
         return accuracies, avg_losses
 
-    def train_and_evaluate(
-        self, cl_dataset: ContinualDataset
-    ) -> Tuple[float, float, List[float], List[float], List[float], List[float], List[List[torch.Tensor]]]:
+    def train_and_evaluate(self, cl_dataset: ContinualDataset) -> Tuple[
+        float,
+        float,
+        List[float],
+        List[float],
+        List[float],
+        List[float],
+        List[List[torch.Tensor]],
+    ]:
         """
         Main training and evaluation function.
 
@@ -425,15 +449,19 @@ class CLTrainer:
 
         for task_id in range(self.num_tasks):
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
-            
+
             logging.info(f"Training on Task {task_id}...")
 
             for epoch in range(self.num_epochs):
                 # Train step
                 epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list = (
-                    self._train_epoch(train_loader=train_loader, epoch=epoch, first_task=task_id == 0, task_id=task_id)
+                    self._train_epoch(
+                        train_loader=train_loader,
+                        epoch=epoch,
+                        first_task=task_id == 0,
+                        task_id=task_id,
+                    )
                 )
-                
 
                 train_losses[task_id].append(epoch_loss)
                 train_accuracies[task_id].append(epoch_accuracy)
@@ -449,21 +477,21 @@ class CLTrainer:
                     eval_acc, eval_loss = self._evaluate_seen_tasks(test_loaders, epoch)
                 if (epoch + 1) % self.checkpoint_freq == 0:
                     self._save_checkpoint(epoch)
-                    
-                
+
                 # commit only once at the end of the epoch to avoid multiple steps
                 if wandb.run:
-                    wandb.log({}, commit = True)
+                    wandb.log({}, commit=True)
 
             test_accs_current, test_avg_losses_current = self._evaluate_seen_tasks(
-                test_loaders, log_to_wandb=False,
+                test_loaders,
+                log_to_wandb=False,
             )
             # append the test accuracies and losses for the current task:
             for id in range(task_id + 1):
                 self.test_accuracies[id].append(test_accs_current.get(id, 0))
                 self.test_losses[id].append(test_avg_losses_current[id])
-                
-        # save to csv as backup 
+
+        # save to csv as backup
         average_accuracy, average_max_forgetting = self._save_metrics_to_csv(
             train_losses,
             train_accuracies,
@@ -473,7 +501,7 @@ class CLTrainer:
         )
 
         return (
-            average_accuracy, 
+            average_accuracy,
             average_max_forgetting,
             train_losses,
             train_accuracies,
@@ -481,7 +509,7 @@ class CLTrainer:
             self.test_losses,
             top_k_eigenvalues,
         )
-    
+
     def _save_metrics_to_csv(
         self,
         train_losses: Dict[int, List[float]],
@@ -508,134 +536,132 @@ class CLTrainer:
         train_data = []
         test_data = []
         eigenvalue_data = []
-        
+
         overlap_data = []
-                
+
         for task_id in range(self.num_tasks):
             for epoch in range(self.num_epochs):
                 # training metrics
                 if epoch < len(train_losses[task_id]):
-                    train_data.append({
-                        'task_id': task_id,
-                        'epoch': epoch,
-                        'loss': train_losses[task_id][epoch],
-                        'accuracy': train_accuracies[task_id][epoch]
-                    })
-                
+                    train_data.append(
+                        {
+                            "task_id": task_id,
+                            "epoch": epoch,
+                            "loss": train_losses[task_id][epoch],
+                            "accuracy": train_accuracies[task_id][epoch],
+                        }
+                    )
+
                 # eigenvalues
                 if epoch < len(top_k_eigenvalues[task_id]):
                     eigenvalues = top_k_eigenvalues[task_id][epoch]
                     for batch_idx, eigen_value in enumerate(eigenvalues):
-                        eigenvalue_data.append({
-                            'task_id': task_id,
-                            'epoch': epoch,
-                            'batch_id': batch_idx,
-                            # reverse eigenvalues to have the largest eigenvalue first
-                            'value': eigen_value.item() if isinstance(eigen_value, torch.Tensor) else eigen_value[::-1]
-                        })
+                        eigenvalue_data.append(
+                            {
+                                "task_id": task_id,
+                                "epoch": epoch,
+                                "batch_id": batch_idx,
+                                # reverse eigenvalues to have the largest eigenvalue first
+                                "value": (
+                                    eigen_value.item()
+                                    if isinstance(eigen_value, torch.Tensor)
+                                    else eigen_value[::-1]
+                                ),
+                            }
+                        )
             # test metrics
             for evaluated_at_task in range(self.num_tasks):
                 if evaluated_at_task >= task_id:
-                    test_data.append({
-                        'task_id': task_id,
-                        'evaluated_at_task': evaluated_at_task,
-                        'loss': test_losses[task_id][evaluated_at_task-task_id],
-                        'accuracy': test_accuracies[task_id][evaluated_at_task-task_id]
-                    })
-            
+                    test_data.append(
+                        {
+                            "task_id": task_id,
+                            "evaluated_at_task": evaluated_at_task,
+                            "loss": test_losses[task_id][evaluated_at_task - task_id],
+                            "accuracy": test_accuracies[task_id][
+                                evaluated_at_task - task_id
+                            ],
+                        }
+                    )
+
             if self.calculate_next_top_k and task_id < self.num_tasks - 1:
-                for step, (overlap, overlap_next) in enumerate(zip(self.overlaps[task_id], self.overlaps_next_top_k[task_id])):
-                    overlap_data.append({
-                        'task_id': task_id,
-                        'step': step + task_id * self.num_epochs,
-                        'overlap': overlap,
-                        'overlap_next_top_k': overlap_next
-                    })
-                        
-        
+                for step, (overlap, overlap_next) in enumerate(
+                    zip(self.overlaps[task_id], self.overlaps_next_top_k[task_id])
+                ):
+                    overlap_data.append(
+                        {
+                            "task_id": task_id,
+                            "step": step + task_id * self.num_epochs,
+                            "overlap": overlap,
+                            "overlap_next_top_k": overlap_next,
+                        }
+                    )
+
         # create dataframes for saving
         train_df = pd.DataFrame(train_data)
         test_df = pd.DataFrame(test_data)
         eigenvalue_df = pd.DataFrame(eigenvalue_data).explode("value")
-        
+
         if self.calculate_next_top_k:
             print(f"{overlap_data=}")
             overlap_df = pd.DataFrame(overlap_data)
             print(overlap_df)
-            overlap_df.to_csv(
-                self.save_dir / "metrics" / "overlaps.csv",
-                index=False
-            )
-            
-        
+            overlap_df.to_csv(self.save_dir / "metrics" / "overlaps.csv", index=False)
+
         # add eigenvalue_nr column
-        eigenvalue_df['eigenvalue_nr'] = eigenvalue_df.groupby(["task_id", "epoch", "batch_id"]).cumcount() + 1
+        eigenvalue_df["eigenvalue_nr"] = (
+            eigenvalue_df.groupby(["task_id", "epoch", "batch_id"]).cumcount() + 1
+        )
         eigenvalue_df = eigenvalue_df.reset_index(drop=True)
-        
+
         # save to csv
-        train_df.to_csv(
-            self.save_dir / "metrics" / "train_metrics.csv",
-            index=False
-        )
-        test_df.to_csv(
-            self.save_dir/ "metrics/test_metrics.csv",
-            index=False
-        )
-        eigenvalue_df.to_csv(
-            self.save_dir/"metrics/eigenvalues.csv",
-            index=False
-        )
-        
-        
+        train_df.to_csv(self.save_dir / "metrics" / "train_metrics.csv", index=False)
+        test_df.to_csv(self.save_dir / "metrics/test_metrics.csv", index=False)
+        eigenvalue_df.to_csv(self.save_dir / "metrics/eigenvalues.csv", index=False)
+
         # ------------------------------------------------------------------- #
         #                          Average Accuracy                           #
         # ------------------------------------------------------------------- #
         # calculate average accuracy:
-        avg_accuracy = (
-            test_df
-            .query("evaluated_at_task == @self.num_tasks-1")["accuracy"]
-            .mean()
-        )
-        
+        avg_accuracy = test_df.query("evaluated_at_task == @self.num_tasks-1")[
+            "accuracy"
+        ].mean()
+
         # ------------------------------------------------------------------- #
         #                     Average Maximum Forgetting                      #
         # ------------------------------------------------------------------- #
         # see e.g. https://arxiv.org/pdf/2010.11635 page 3
         total_forgetting = 0.0
         # For each task j (excluding the last task)
-        for j in range(self.num_tasks-1):
+        for j in range(self.num_tasks - 1):
             # get accuracies for task j
             task_data = test_df.query("task_id == @j")
             # get peak accuracy across all previous evaluations
             peak_accuracy = task_data["accuracy"].max()
-                
+
             # get the final accuracy a_{T,j}
-            final_accuracy = (
-                task_data
-                .query("evaluated_at_task == @self.num_tasks-1")["accuracy"]
-                .values[0]
-            )
+            final_accuracy = task_data.query("evaluated_at_task == @self.num_tasks-1")[
+                "accuracy"
+            ].values[0]
             # calculate forgetting for this task
             forgetting = peak_accuracy - final_accuracy
             total_forgetting += forgetting
-        
+
         # Calculate average forgetting
-        avg_max_forgetting = total_forgetting / (self.num_tasks-1)
-        
+        avg_max_forgetting = total_forgetting / (self.num_tasks - 1)
+
         # write to csv
-        forgetting_metrics = pd.DataFrame({
-            "average_accuracy": [avg_accuracy],
-            "average_forgetting": [avg_max_forgetting]
-        })
-        
-        forgetting_metrics.to_csv(
-            self.save_dir / "metrics" / "forgetting_metrics.csv",
-            index=False
+        forgetting_metrics = pd.DataFrame(
+            {
+                "average_accuracy": [avg_accuracy],
+                "average_forgetting": [avg_max_forgetting],
+            }
         )
-        
-        
+
+        forgetting_metrics.to_csv(
+            self.save_dir / "metrics" / "forgetting_metrics.csv", index=False
+        )
+
         return avg_accuracy, avg_max_forgetting
-        
 
     def _save_checkpoint(self, epoch: int) -> None:
         """

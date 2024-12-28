@@ -23,10 +23,9 @@ import numpy as np
 import os
 import sys
 
-from hessian_eigenthings.lanczos import lanczos
 
-sys.path.append(os.path.abspath("../"))
-from utils import HVPOperator
+from pytorch_hessian_eigenthings.hessian_eigenthings.lanczos import lanczos
+from pytorch_hessian_eigenthings.hessian_eigenthings.hvp_operator import HVPOperator
 
 
 # =========================================================================== #
@@ -93,7 +92,7 @@ class SubspaceSGD(SGD):
             k (int): Number of top-k eigenvalues and eigenvectors of the Hessian
                 to compute.
             calculate_next_top_k (bool, optional): Whether to calculate the top-k and next top-k
-                eigenvalues and eigenvectors (i.e. 2k in total) or only the 
+                eigenvalues and eigenvectors (i.e. 2k in total) or only the
                 top-k. Defaults to False.
             criterion (nn.modules.loss._Loss): Loss function that is used for
                 calculation of the Hessian.
@@ -124,24 +123,27 @@ class SubspaceSGD(SGD):
         num_params = sum(p.numel() for p in model.parameters())
         # device used for creating new tensors
         self.device = next(model.parameters()).device
-        
+
         self.calculate_next_top_k = calculate_next_top_k
+        # number of top-k eigenvectors to compute
         self.k = k
-        
+
         # reserve memory for eigenvectors and eigenvalues
         self.eigenvectors = torch.zeros(
             (k, num_params), dtype=torch.float32, device=self.device
         )
-        
-        self.eigenvectors_next_top_k = torch.zeros(
-            (k, num_params), dtype=torch.float32, device=self.device
-        ) if calculate_next_top_k else None
-        
+
+        self.eigenvectors_next_top_k = (
+            torch.zeros((k, num_params), dtype=torch.float32, device=self.device)
+            if calculate_next_top_k
+            else None
+        )
+
         self.eigenvalues = np.zeros(k, dtype=np.float32)
-        self.eigenvalues_next_top_k = np.zeros(k, dtype=np.float32) if calculate_next_top_k else None
+        self.eigenvalues_next_top_k = (
+            np.zeros(k, dtype=np.float32) if calculate_next_top_k else None
+        )
         self.model = model
-        # number of top-k eigenvectors to compute
-   
         # maximum number of Lanczos steps for calculation of the eigenbasis
         self.max_lanczos_steps = max_lanczos_steps
 
@@ -155,7 +157,7 @@ class SubspaceSGD(SGD):
                 as separate numpy arrays.
         """
         return self.eigenvalues, self.eigenvectors.cpu().numpy()
-    
+
     @property
     def next_top_k_eigenthings(self) -> Tuple[np.ndarray, np.ndarray]:
         """_summary_
@@ -164,10 +166,13 @@ class SubspaceSGD(SGD):
             Tuple[np.ndarray, np.ndarray]: Returns next top-k eigenvalues and eigenvectors
                 as separate numpy arrays.
         """
-        assert self.calculate_next_top_k, "Next top-k eigenthings were not calculated as calculate_next_top_k was set to False"
-        assert self.eigenvectors_next_top_k.shape[0] == self.k, "The next top-k eigenvectors consist of more than k eigenvectors"
-        
-                
+        assert (
+            self.calculate_next_top_k
+        ), "Next top-k eigenthings were not calculated as calculate_next_top_k was set to False"
+        assert (
+            self.eigenvectors_next_top_k.shape[0] == self.k
+        ), "The next top-k eigenvectors consist of more than k eigenvectors"
+
         return self.eigenvalues_next_top_k, self.eigenvectors_next_top_k
 
     # this method was inspired by the gather_flat_grad() of the LBFGS optimizer
@@ -252,26 +257,36 @@ class SubspaceSGD(SGD):
             fp16 (bool, optional): Whether to use half precision for the eigenthings
         """
         use_gpu = True if self.device.type == "cuda" else False
+
         hvp_operator = HVPOperator(
             model=self.model,
             data_source=data_batch,
             criterion=self.criterion,
             use_gpu=use_gpu,
-            full_dataset=True,
+            full_dataset=False,
+            max_possible_gpu_samples=2**16,
         )
         eigenvalues, eigenvectors = lanczos(
             operator=hvp_operator,
-            num_eigenthings= 2 * self.k if self.calculate_next_top_k else self.k,
+            num_eigenthings=2 * self.k if self.calculate_next_top_k else self.k,
             use_gpu=use_gpu,
             fp16=fp16,
             max_steps=self.max_lanczos_steps,
         )
-        
-        self.eigenvalues = eigenvalues[:self.k] if self.calculate_next_top_k else eigenvalues
-        self.eigenvectors = eigenvectors[:self.k] if self.calculate_next_top_k else eigenvectors
-        
-        self.eigenvalues_next_top_k = eigenvalues[self.k:] if self.calculate_next_top_k else None
-        self.eigenvectors_next_top_k = eigenvectors[self.k:] if self.calculate_next_top_k else None
+
+        self.eigenvalues = (
+            eigenvalues[: self.k] if self.calculate_next_top_k else eigenvalues
+        )
+        self.eigenvectors = (
+            eigenvectors[: self.k] if self.calculate_next_top_k else eigenvectors
+        )
+
+        self.eigenvalues_next_top_k = (
+            eigenvalues[self.k :] if self.calculate_next_top_k else None
+        )
+        self.eigenvectors_next_top_k = (
+            eigenvectors[self.k :] if self.calculate_next_top_k else None
+        )
 
         assert is_orthonormal_basis(
             matrix=self.eigenvectors, device=self.device, tol=1e-4
@@ -322,9 +337,7 @@ class SubspaceSGD(SGD):
         # if not standard/vanilla SGD, project gradient onto subspace
         if subspace_type:
             # Project gradient
-            flat_grad = self._project_gradient(
-                flat_grad, subspace_type=subspace_type
-            )
+            flat_grad = self._project_gradient(flat_grad, subspace_type=subspace_type)
 
         # Unflatten and assign projected gradient back to parameters
         # i.e. update current gradients with projected gradients
