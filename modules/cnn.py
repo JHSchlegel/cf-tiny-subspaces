@@ -12,7 +12,11 @@ import torch.nn as nn
 
 # =========================================================================== #
 #                        Convolutional Neural Network                         #
+#                                                                             #
+# Taken from: Cohen, Kaur, Li, Zico Kolter, Talwalkar (2021, p. 34)           #
 # =========================================================================== #
+
+
 class CNN(nn.Module):
     """
     A simple CNN composed of two convolutional layers followed by three fully
@@ -22,10 +26,7 @@ class CNN(nn.Module):
 
     def __init__(
         self, 
-        in_channels: int = 1,
-        image_size: int = 28,
         output_dim: int = 10,
-        hidden_dim: int = 128
     ):
         """
         Initialize the CNN.
@@ -37,28 +38,21 @@ class CNN(nn.Module):
             hidden_dim (int, optional): Hidden layer size. Defaults to 128.
         """
         super(CNN, self).__init__()
-        
-        # Compute the size of the flattened features after convolutions
-        conv_output_size = (image_size - 4) // 4 
-        flatten_size = 64 * conv_output_size * conv_output_size
 
         # Convolutional layers
         self.conv_layers = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3),
+            nn.Conv2d(3, 32, bias=True, kernel_size=3, padding=1), 
             nn.ReLU(),
             nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, kernel_size=3),
+            nn.Conv2d(32, 32, bias=True, kernel_size=3, padding=1), 
             nn.ReLU(),
-            nn.MaxPool2d(2)
+            nn.MaxPool2d(2) 
         )
 
         # Fully connected layers
         self.fc_layers = nn.Sequential(
-            nn.Linear(flatten_size, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim)
+            nn.Flatten(),
+            nn.Linear(2048, output_dim, bias=True)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -72,7 +66,6 @@ class CNN(nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, output_dim)
         """
         x = self.conv_layers(x)
-        x = x.view(x.size(0), -1)
         x = self.fc_layers(x)
         
         return x
