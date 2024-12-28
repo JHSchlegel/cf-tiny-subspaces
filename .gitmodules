@@ -1,0 +1,3 @@
+[submodule "pytorch_hessian_eigenthings"]
+	path = pytorch_hessian_eigenthings
+	url = git@github.com:noahgolmant/pytorch-hessian-eigenthings.git
