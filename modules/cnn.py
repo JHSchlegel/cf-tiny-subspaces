@@ -25,7 +25,7 @@ class CNN(nn.Module):
     """
 
     def __init__(
-        self, 
+        self,
         output_dim: int = 10,
     ):
         """
@@ -41,18 +41,17 @@ class CNN(nn.Module):
 
         # Convolutional layers
         self.conv_layers = nn.Sequential(
-            nn.Conv2d(3, 32, bias=True, kernel_size=3, padding=1), 
+            nn.Conv2d(3, 32, bias=True, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
-            nn.Conv2d(32, 32, bias=True, kernel_size=3, padding=1), 
+            nn.Conv2d(32, 32, bias=True, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2) 
+            nn.MaxPool2d(2),
         )
 
         # Fully connected layers
         self.fc_layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(2048, output_dim, bias=True)
+            nn.Flatten(), nn.Linear(2048, output_dim, bias=True)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -67,5 +66,5 @@ class CNN(nn.Module):
         """
         x = self.conv_layers(x)
         x = self.fc_layers(x)
-        
+
         return x

@@ -171,21 +171,13 @@ class CLTrainer:
         subdata = torch.utils.data.Subset(train_loader.dataset, random_indices)
         logging.info(f"Finished subsampling training data")
 
-        # return a single tuple of subsampled data and targets; not a dataloader
-        # as pytorch hessian eigenthings has a huge overhead when using dataloaders
-        # instead of just the data and targets in the ARPACK routine
-        # Hence, we implemented our own logic in utils/hvp_operator.py for
-        # allowing the use of a single tuple of data and targets
-        return next(
-            iter(
-                DataLoader(
-                    subdata,
-                    batch_size=num_samples,
-                    shuffle=False,
-                    num_workers=0,
-                    pin_memory=False,
-                )
-            )
+        # return a new dataloader with the subsampled data
+        return DataLoader(
+            subdata,
+            batch_size=50,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=False,
         )
 
     def _train_epoch(
@@ -214,6 +206,7 @@ class CLTrainer:
         """
         self.model.train()
         epoch_loss = 0.0
+        epoch_losses = []
         correct = 0
         total = 0
         start_time = time.time()
@@ -221,6 +214,7 @@ class CLTrainer:
         eigenvalues_list = []
 
         for batch_idx, (data, target) in enumerate(train_loader):
+
             data, target = data.to(self.device), target.to(self.device)
 
             self.optimizer.zero_grad()
@@ -285,9 +279,12 @@ class CLTrainer:
 
             # Calculate accuracy
             pred = output.argmax(dim=1, keepdim=True)
-            correct += torch.sum(pred.eq(target.view_as(pred))).item()
+            current_correct = torch.sum(pred.eq(target.view_as(pred))).item()
+            correct += current_correct
             total += target.size(0)
             epoch_loss += loss.item()
+
+            epoch_losses.append(loss.item())
 
             # Log progress in wandb
             if batch_idx % self.log_interval == 0:
@@ -325,7 +322,7 @@ class CLTrainer:
                 commit=False,  # commit only once at the end of the epoch to avoid multiple steps
             )
 
-        return epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list
+        return epoch_losses, epoch_accuracy, epoch_time, eigenvalues_list
 
     @torch.no_grad()
     def _evaluate_seen_tasks(
@@ -454,7 +451,7 @@ class CLTrainer:
 
             for epoch in range(self.num_epochs):
                 # Train step
-                epoch_loss, epoch_accuracy, epoch_time, eigenvalues_list = (
+                epoch_losses, epoch_accuracy, epoch_time, eigenvalues_list = (
                     self._train_epoch(
                         train_loader=train_loader,
                         epoch=epoch,
@@ -463,13 +460,13 @@ class CLTrainer:
                     )
                 )
 
-                train_losses[task_id].append(epoch_loss)
+                train_losses[task_id].append(epoch_losses)
                 train_accuracies[task_id].append(epoch_accuracy)
                 top_k_eigenvalues[task_id].append(eigenvalues_list)
 
                 logging.info(f"\nTask {task_id} Epoch {epoch} Summary:")
-                logging.info(f"Average Loss: {epoch_loss:.6f}")
-                logging.info(f"Accuracy: {epoch_accuracy:.2f}%")
+                logging.info(f"Average Loss: {np.mean(epoch_losses):.6f}")
+                logging.info(f"Accuracy: {np.mean(epoch_accuracy):.2f}%")
                 logging.info(f"Time taken: {epoch_time:.2f}s")
 
                 # Evaluate on test set
@@ -543,14 +540,16 @@ class CLTrainer:
             for epoch in range(self.num_epochs):
                 # training metrics
                 if epoch < len(train_losses[task_id]):
-                    train_data.append(
-                        {
-                            "task_id": task_id,
-                            "epoch": epoch,
-                            "loss": train_losses[task_id][epoch],
-                            "accuracy": train_accuracies[task_id][epoch],
-                        }
-                    )
+                    for batch_id, loss in enumerate(train_losses[task_id][epoch]):
+                        train_data.append(
+                            {
+                                "task_id": task_id,
+                                "epoch": epoch,
+                                "step": batch_id,
+                                "loss": loss,
+                                "accuracy": train_accuracies[task_id][epoch],
+                            }
+                        )
 
                 # eigenvalues
                 if epoch < len(top_k_eigenvalues[task_id]):
