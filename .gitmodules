@@ -1,3 +1,3 @@
 [submodule "pytorch_hessian_eigenthings"]
 	path = pytorch_hessian_eigenthings
-	url = ../pytorch_hessian_eigenthings.git
+	url = ../pytorch-hessian-eigenthings.git
