@@ -10,10 +10,9 @@ model:
   in_channels: 3
   image_size: 32
   hidden_dim: 100
-  output_dim: 100
 
 optimizer:
-  lr: 0.01
+  lr: 0.001
   weight_decay: 0.0
   k: 10
   max_lanczos_steps: 100
@@ -24,9 +23,9 @@ optimizer:
 
 training:
   seed: 42
-  num_epochs: 15 
+  num_epochs: 2
   log_interval: 10
-  subspace_type: "bulk"
+  subspace_type: null
   eval_freq: 1
   checkpoint_freq: 1
   device: "cuda:0"

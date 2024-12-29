@@ -20,6 +20,7 @@ from utils.data_utils.sequential_CIFAR import CL_CIFAR10
 # Ignore annoying hydra warnings
 warnings.filterwarnings("ignore")
 
+
 # =========================================================================== #
 #                          Main Training Function                             #
 # =========================================================================== #
@@ -36,9 +37,10 @@ def main(config: DictConfig) -> None:
     print(f"Saving results to {save_dir}")
 
     # Create sequential CIFAR10 dataset:
-    split_cifar10 = CL_CIFAR10(classes_per_task=config.data.classes_per_task, 
-                        num_tasks=config.data.num_tasks, 
-                        seed=config.data.seed
+    split_cifar10 = CL_CIFAR10(
+        classes_per_task=config.data.classes_per_task,
+        num_tasks=config.data.num_tasks,
+        seed=config.data.seed,
     )
     split_cifar10.setup_tasks(
         batch_size=config.data.batch_size,
@@ -48,10 +50,7 @@ def main(config: DictConfig) -> None:
 
     # Initialize model
     model = CNN(
-        in_channels=config.model.in_channels
-        image_size=config.model.image_size,
-        output_dim=config.model.output_dim,
-        hidden_dim=config.model.hidden_dim,
+        output_dim=config.data.classes_per_task * config.data.num_tasks,
     )
     model.to(config.training.get("device", "cuda"))
 
@@ -89,16 +88,14 @@ def main(config: DictConfig) -> None:
     try:
         # Train and evaluate
         (
-            avg_accuracy, 
-            avg_max_forgetting, 
-            train_losses, 
-            train_accuracies, 
-            test_accuracies, 
-            test_losses, 
-            eigenvalues 
-        ) = (
-            trainer.train_and_evaluate(split_cifar10)
-        )
+            avg_accuracy,
+            avg_max_forgetting,
+            train_losses,
+            train_accuracies,
+            test_accuracies,
+            test_losses,
+            eigenvalues,
+        ) = trainer.train_and_evaluate(split_cifar10)
 
         print(f"Test accuracies: {test_accuracies}")
         print(f"Test losses: {test_losses}")

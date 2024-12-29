@@ -24,7 +24,7 @@ training:
   seed: 42
   num_epochs: 5
   log_interval: 10
-  subspace_type: "bulk"
+  subspace_type: null
   eval_freq: 1
   checkpoint_freq: 1
   device: "cuda:0"
