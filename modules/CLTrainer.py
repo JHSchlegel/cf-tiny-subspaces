@@ -141,6 +141,10 @@ class CLTrainer:
             if self.calculate_next_top_k
             else None
         )
+        self.overlaps_bulk = {i: [] for i in range(self.num_tasks - 1)}
+        self.overlaps_bulk_next_k = {
+            i: [] for i in range(self.num_tasks - 1)
+        } if self.calculate_next_top_k else None
 
     def _subsample_train_loader(
         self,
@@ -259,18 +263,39 @@ class CLTrainer:
 
             if self.calculate_next_top_k:
                 for id in range(min(self.num_tasks - 1, task_id + 1)):
+                    # Calculate dominant subspace overlap
                     top_k_overlap = compute_overlap(
                         self.eigenvectors[id],
                         torch.from_numpy(eigenvectors).to(self.device),
+                        orthogonal_complement=False,
                     )
                     self.overlaps[id].append(top_k_overlap)
 
+                    # Calculate bulk subspace overlap
+                    bulk_overlap = compute_overlap(
+                        self.eigenvectors[id],
+                        torch.from_numpy(eigenvectors).to(self.device),
+                        orthogonal_complement=True,
+                    )
+
+                    self.overlaps_bulk[id].append(bulk_overlap)
+
+                    # Next top-k dominant subspace overlap
                     next_top_k_overlap = compute_overlap(
                         self.eigenvectors_next_top_k[id],
                         torch.from_numpy(eigenvectors_next_top_k).to(self.device),
+                        orthogonal_complement=False,
                     )
 
                     self.overlaps_next_top_k[id].append(next_top_k_overlap)
+
+                    # Next top-k bulk subspace overlap
+                    next_top_k_bulk_overlap = compute_overlap(
+                        self.eigenvectors_next_top_k[id],
+                        torch.from_numpy(eigenvectors_next_top_k).to(self.device),
+                        orthogonal_complement=True
+                    )
+                    self.overlaps_bulk_next_k[id].append(next_top_k_bulk_overlap)
 
                     logging.info(
                         f"Overlap between top-k eigenvectors of of first step of  task {id} and current step: {top_k_overlap}"
@@ -583,15 +608,20 @@ class CLTrainer:
                     )
 
             if self.calculate_next_top_k and task_id < self.num_tasks - 1:
-                for step, (overlap, overlap_next) in enumerate(
-                    zip(self.overlaps[task_id], self.overlaps_next_top_k[task_id])
-                ):
+                for step, (overlap, overlap_next, bulk_overlap, bulk_next) in enumerate(zip(
+                    self.overlaps[task_id], 
+                    self.overlaps_next_top_k[task_id],
+                    self.overlaps_bulk[task_id],
+                    self.overlaps_bulk_next_k[task_id],
+                )):
                     overlap_data.append(
                         {
                             "task_id": task_id,
                             "step": step + task_id * self.num_epochs,
-                            "overlap": overlap,
-                            "overlap_next_top_k": overlap_next,
+                            "overlap_dominant": overlap,
+                            "overlap_next_top_k_dominant": overlap_next,
+                            "overlap_bulk": bulk_overlap,
+                            "overlap_next_top_k_bulk": bulk_next,
                         }
                     )
 
