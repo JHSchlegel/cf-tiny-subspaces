@@ -4,7 +4,6 @@
 1. [Contributors](#contributors)
 2. [Setup](#setup)
 3. [Source Code Structure](#source-code-structure)
-4. [Licenses](#licenses)
 
 ## Contributors
 - Rufat Asadli (22-953-632)
@@ -18,11 +17,6 @@
 conda create -n cf python=3.10 pip
 conda activate cf
 pip install -r requirements.txt
-```
-
-We moreover make use of the "hessian_eigenthings" package for computing the top-k eigenvectors of the Hessian in a scalable way. "hessian_eigenthings" can be installed by running
-```bash
-pip install --upgrade git+https://github.com/noahgolmant/pytorch-hessian-eigenthings.git@master#egg=hessian-eigenthings
 ```
 
 This repository includes the "hessian_eigenthings" as a submodule; after cloning, run the following commands at the root level of the main repository. 
@@ -62,6 +56,3 @@ to initialize and update the submodule.
     ├── metrics.py
     └── plotting.py
 ```
-
-## Licenses
-The file `utils/hvp_operator.py` is an adapted version of the implementation of the Hessian-vector product operator from the "hessian_eigenthings" package. The original implementation can be found [here](https://github.com/noahgolmant/pytorch-hessian-eigenthings/blob/master/hessian_eigenthings/hvp_operator.py). The corresponding licence that is used for this file is a copy of the original license of the "hessian_eigenthings" package and is named `LICENSE-hessian-eigenthings`. For details about the adaptions we made to the original implementation, we refer to the comment header of the file `pytorch_hessian_eigenthings/hessian_eigenthings/hvp_operator.py`.
