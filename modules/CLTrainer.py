@@ -472,7 +472,7 @@ class CLTrainer:
 
         for task_id in range(self.num_tasks):
             
-            self.model._set_task(taskd_id)
+            self.model._set_task(task_id)
 
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
 
