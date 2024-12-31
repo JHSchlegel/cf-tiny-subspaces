@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import logging
+from omegaconf import DictConfig, OmegaConf
 
 import os
 import sys
@@ -27,6 +28,7 @@ from utils.wandb_utils import setup_wandb
 from utils.reproducibility import set_all_seeds
 from utils.data_utils.continual_dataset import ContinualDataset
 from utils.metrics import compute_overlap
+from modules.subspace_sgd import SubspaceSGD
 
 
 # =========================================================================== #
@@ -43,8 +45,8 @@ class CLTrainer:
 
     def __init__(
         self,
+        optimizer_config,
         model: nn.Module,
-        optimizer: optim.Optimizer,
         criterion: nn.Module,
         save_dir: str,
         num_tasks: int,
@@ -94,8 +96,8 @@ class CLTrainer:
             )
 
         self.model = model.to(device)
-        self.optimizer = optimizer
         self.criterion = criterion
+        self.optimizer_config = optimizer_config
         self.scheduler = scheduler
         self.save_dir = Path(save_dir)
         self.num_epochs = num_epochs
@@ -127,7 +129,7 @@ class CLTrainer:
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
 
-        self.calculate_next_top_k = self.optimizer.calculate_next_top_k
+        self.calculate_next_top_k = self.optimizer_config.calculate_next_top_k
 
         self.eigenvectors = {i: [] for i in range(self.num_tasks - 1)}
         self.eigenvectors_next_top_k = (
@@ -222,13 +224,11 @@ class CLTrainer:
         for batch_idx, (data, target) in enumerate(train_loader):
 
             data, target = data.to(self.device), target.to(self.device)
-
+            print("225")
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
-
             loss.backward()
-
             # Use the custom built optimizer. We pass a standard optimization
             # in the first epoch and perform gradient projection in later steps.
             self.optimizer.step(
@@ -474,6 +474,13 @@ class CLTrainer:
 
             self.model._set_task(task_id)
 
+            # Initialize optimizer for task
+            self.optimizer = SubspaceSGD(
+                nn.Sequential(*[self.model.conv_layers, self.model.fc[task_id]]),
+                criterion=self.criterion,
+                **OmegaConf.to_container(self.optimizer_config, resolve=True),
+            )
+
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
 
             logging.info(f"Training on Task {task_id}...")
@@ -488,6 +495,8 @@ class CLTrainer:
                         task_id=task_id,
                     )
                 )
+
+                print("done epoch")
 
                 train_losses[task_id].append(epoch_losses)
                 train_accuracies[task_id].append(epoch_accuracy)

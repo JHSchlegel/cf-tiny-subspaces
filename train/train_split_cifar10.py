@@ -59,17 +59,10 @@ def main(config: DictConfig) -> None:
     # Initialize loss function
     criterion = nn.CrossEntropyLoss()
 
-    # Initialize optimizer
-    optimizer = SubspaceSGD(
-        model,
-        criterion=criterion,
-        **OmegaConf.to_container(config.optimizer, resolve=True),
-    )
-
     # Initialize trainer
     trainer = CLTrainer(
         model=model,
-        optimizer=optimizer,
+        optimizer_config=config.optimizer,
         criterion=criterion,
         save_dir=str(save_dir),
         num_tasks=config.data.num_tasks,
