@@ -142,9 +142,11 @@ class CLTrainer:
             else None
         )
         self.overlaps_bulk = {i: [] for i in range(self.num_tasks - 1)}
-        self.overlaps_bulk_next_k = {
-            i: [] for i in range(self.num_tasks - 1)
-        } if self.calculate_next_top_k else None
+        self.overlaps_bulk_next_k = (
+            {i: [] for i in range(self.num_tasks - 1)}
+            if self.calculate_next_top_k
+            else None
+        )
 
     def _subsample_train_loader(
         self,
@@ -293,7 +295,7 @@ class CLTrainer:
                     next_top_k_bulk_overlap = compute_overlap(
                         self.eigenvectors_next_top_k[id],
                         torch.from_numpy(eigenvectors_next_top_k).to(self.device),
-                        orthogonal_complement=True
+                        orthogonal_complement=True,
                     )
                     self.overlaps_bulk_next_k[id].append(next_top_k_bulk_overlap)
 
@@ -327,8 +329,6 @@ class CLTrainer:
         epoch_time = time.time() - start_time
         epoch_loss /= len(train_loader)
         epoch_accuracy = 100.0 * correct / total
-
-        del eigenvectors, eigenvectors_next_top_k
 
         # Log epoch metrics
         if wandb.run:
@@ -471,7 +471,7 @@ class CLTrainer:
         top_k_eigenvalues = {i: [] for i in range(self.num_tasks)}
 
         for task_id in range(self.num_tasks):
-            
+
             self.model._set_task(task_id)
 
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
@@ -612,12 +612,14 @@ class CLTrainer:
                     )
 
             if self.calculate_next_top_k and task_id < self.num_tasks - 1:
-                for step, (overlap, overlap_next, bulk_overlap, bulk_next) in enumerate(zip(
-                    self.overlaps[task_id], 
-                    self.overlaps_next_top_k[task_id],
-                    self.overlaps_bulk[task_id],
-                    self.overlaps_bulk_next_k[task_id],
-                )):
+                for step, (overlap, overlap_next, bulk_overlap, bulk_next) in enumerate(
+                    zip(
+                        self.overlaps[task_id],
+                        self.overlaps_next_top_k[task_id],
+                        self.overlaps_bulk[task_id],
+                        self.overlaps_bulk_next_k[task_id],
+                    )
+                ):
                     overlap_data.append(
                         {
                             "task_id": task_id,
