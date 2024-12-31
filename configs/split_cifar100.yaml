@@ -10,6 +10,7 @@ model:
   in_channels: 3
   image_size: 32
   hidden_dim: 100
+  width: 32
 
 optimizer:
   lr: 0.001

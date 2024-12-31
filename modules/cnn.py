@@ -41,8 +41,8 @@ class CNN(nn.Module):
         """
         super(CNN, self).__init__()
 
-        self.feature_dim = width * 64
-        self.task = None
+        self.feature_dim = width * 64 # spatial dimension of image after two conv layer is 8 x 8
+        self.task = None # initalise the task to be solved as null
 
         # Convolutional layers
         self.conv_layers = nn.Sequential(

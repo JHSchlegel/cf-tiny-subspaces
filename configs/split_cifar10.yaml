@@ -10,6 +10,7 @@ model:
   in_channels: 3
   image_size: 32
   hidden_dim: 100
+  width: 32
 
 optimizer:
   lr: 0.001
@@ -23,7 +24,7 @@ optimizer:
 
 training:
   seed: 42
-  num_epochs: 15
+  num_epochs: 5
   log_interval: 10
   subspace_type: null
   eval_freq: 1

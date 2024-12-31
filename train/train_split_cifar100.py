@@ -50,7 +50,9 @@ def main(config: DictConfig) -> None:
 
     # Initialize model
     model = CNN(
-        output_dim=config.data.classes_per_task * config.data.num_tasks,
+        width=config.model.width
+        num_tasks=config.data.num_tasks
+        classes_per_task=config.data.classes_per_task
     )
     model.to(config.training.get("device", "cuda"))
 
