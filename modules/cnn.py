@@ -26,7 +26,9 @@ class CNN(nn.Module):
 
     def __init__(
         self,
-        output_dim: int = 10,
+        width: int = 32,
+        num_tasks: int = 5,
+        classes_per_task: int = 2
     ):
         """
         Initialize the CNN.
@@ -39,20 +41,29 @@ class CNN(nn.Module):
         """
         super(CNN, self).__init__()
 
+        self.feature_dim = width * 64
+        self.task = None
+
         # Convolutional layers
         self.conv_layers = nn.Sequential(
-            nn.Conv2d(3, 32, bias=True, kernel_size=3, padding=1),
+            nn.Conv2d(3, width, bias=True, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
-            nn.Conv2d(32, 32, bias=True, kernel_size=3, padding=1),
+            nn.Conv2d(width, width, bias=True, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
         )
 
         # Fully connected layers
-        self.fc_layers = nn.Sequential(
-            nn.Flatten(), nn.Linear(2048, output_dim, bias=True)
-        )
+        self.fc = nn.ModuleList([
+            nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(self.feature_dim, classes_per_task) 
+            ) for _ in range(num_tasks)
+        ])
+        
+    def _set_task(self, task_id):
+        self.task = task_id
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -64,7 +75,6 @@ class CNN(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, output_dim)
         """
-        x = self.conv_layers(x)
-        x = self.fc_layers(x)
+        features = self.conv_layers(x)
 
-        return x
+        return self.fc[self.task](features)

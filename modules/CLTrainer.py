@@ -379,6 +379,7 @@ class CLTrainer:
         total_samples = {}
 
         for task_id, task_test_loader in test_loaders.items():
+            self.model._set_task(task_id)
             total_loss = 0
             correct = 0
             total_samples[task_id] = 0
@@ -470,6 +471,9 @@ class CLTrainer:
         top_k_eigenvalues = {i: [] for i in range(self.num_tasks)}
 
         for task_id in range(self.num_tasks):
+            
+            self.model._set_task(taskd_id)
+
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
 
             logging.info(f"Training on Task {task_id}...")

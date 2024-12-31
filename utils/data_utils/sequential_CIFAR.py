@@ -11,6 +11,23 @@ from typing import List, Tuple, Dict, Optional, Iterator
 import warnings
 
 
+class Relabel(Dataset):
+    """Wrapper dataset that relabels class indices within each task"""
+    def __init__(self, dataset: Dataset, task_classes: List[int]):
+        self.dataset = dataset
+        self.task_classes = task_classes
+        # Create mapping from original class indices to new indices (0 to N-1)
+        self.class_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(task_classes)}
+        
+    def __getitem__(self, index):
+        img, label = self.dataset[index]
+        # Map the original label to new label (0 to N-1)
+        new_label = self.class_mapping[label]
+        return img, new_label
+    
+    def __len__(self):
+        return len(self.dataset)
+
 class CL_CIFAR100(ContinualDataset):
     """
     Continual dataset class for the CIFAR-100 dataset
@@ -58,15 +75,18 @@ class CL_CIFAR100(ContinualDataset):
             train_subset = Subset(train_dataset, train_indices)
             test_subset = Subset(test_dataset, test_indices)
 
+            train_relabeled = Relabel(train_subset, task_classes)
+            test_relabeled = Relabel(test_subset, task_classes)
+
             self.train_loaders[task_id] = DataLoader(
-                train_subset,
+                train_relabeled,
                 batch_size=batch_size,
                 shuffle=True,
                 num_workers=num_workers,
                 pin_memory=True
             )
             self.test_loaders[task_id] = DataLoader(
-                test_subset,
+                test_relabeled,
                 batch_size=batch_size,
                 shuffle=False,
                 num_workers=num_workers,
@@ -120,15 +140,18 @@ class CL_CIFAR10(ContinualDataset):
             train_subset = Subset(train_dataset, train_indices)
             test_subset = Subset(test_dataset, test_indices)
 
+            train_relabeled = Relabel(train_subset, task_classes)
+            test_relabeled = Relabel(test_subset, task_classes)
+
             self.train_loaders[task_id] = DataLoader(
-                train_subset,
+                train_relabeled,
                 batch_size=batch_size,
                 shuffle=True,
                 num_workers=num_workers,
                 pin_memory=True
             )
             self.test_loaders[task_id] = DataLoader(
-                test_subset,
+                test_relabeled,
                 batch_size=batch_size,
                 shuffle=False,
                 num_workers=num_workers,
