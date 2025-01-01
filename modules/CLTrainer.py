@@ -45,7 +45,7 @@ class CLTrainer:
 
     def __init__(
         self,
-        optimizer_config,
+        optimizer_config: Dict,
         model: nn.Module,
         criterion: nn.Module,
         save_dir: str,
@@ -65,30 +65,34 @@ class CLTrainer:
         wandb_config: Optional[Dict] = None,
     ) -> None:
         """
-        Initialize an instance of the Continual Learning Trainer.
-
         Args:
-            model: Neural network model being trained
-            optimizer: Custom-built subspace optimizer
-            criterion: Loss function used for training
-            save_dir: Directory path to save models and visualizations
-            num_tasks: Number of tasks in the continual learning setting
-            num_epochs: Number of epochs for training
-            log_interval: Interval for logging metrics during training
-            eval_freq: Frequency of evaluation on the test set
-            num_subsamples_Hessian: Number of samples of the train loader that will
-                be used for the Hessian (and eigenvalues/eigenvectors) computation.
-                If None, uses only the current batch instead of the subsampled
-                train loader. Defaults to 5_000.
-            checkpoint_freq: Frequency of saving model checkpoints
-            seed: Random seed for reproducibility
-            subspace_type: Type of subspace projection ("bulk" or "dominant")
-            scheduler: Learning rate scheduler
-            device: Device to run computations on
-            use_wandb: Whether to initialize wandb logging
-            wandb_log_dir: Logging directory for weights and biases
-            wandb_project: Project name of weights and biases
-            wandb_config: Configs used for run; saved in weights and biases
+            optimizer_config (Dict): Configuration dictionary for the optimizer setup
+            model (nn.Module): Neural network model to be trained
+            criterion (nn.Module): Loss function module
+            save_dir (str): Directory path for saving checkpoints and results
+            num_tasks (int): Number of continual learning tasks
+            num_epochs (int): Number of training epochs per task
+            log_interval (int): Frequency of logging training metrics (in iterations)
+            eval_freq (int): Frequency of evaluation (in epochs)
+            num_subsamples_Hessian (Optional[int]): Number of samples for Hessian computation.
+                Defaults to 5000.
+            checkpoint_freq (int): Frequency of model checkpointing (in epochs).
+                Defaults to 10.
+            seed (int): Random seed for reproducibility. Defaults to 42.
+            subspace_type (Optional[str]): Type of subspace restriction {'bulk', 'dominant', None}.
+                Defaults to None.
+            scheduler (Optional[_LRScheduler]): Learning rate scheduler.
+                Defaults to None.
+            device (str): Device to run the training on ('cuda' or 'cpu').
+                Defaults to 'cuda' if available, else 'cpu'.
+            use_wandb (bool): Whether to use Weights & Biases logging.
+                Defaults to True.
+            wandb_log_dir (Optional[str]): Directory for W&B logs.
+                Defaults to None.
+            wandb_project (Optional[str]): W&B project name.
+                Defaults to None.
+            wandb_config (Optional[Dict]): Additional configuration for W&B.
+                Defaults to None.
         """
         if subspace_type not in self.VALID_SUBSPACE_TYPES:
             raise ValueError(
@@ -224,7 +228,6 @@ class CLTrainer:
         for batch_idx, (data, target) in enumerate(train_loader):
 
             data, target = data.to(self.device), target.to(self.device)
-            print("225")
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
@@ -471,7 +474,8 @@ class CLTrainer:
         top_k_eigenvalues = {i: [] for i in range(self.num_tasks)}
 
         for task_id in range(self.num_tasks):
-
+            
+            # Set which task we are training
             self.model._set_task(task_id)
 
             # Initialize optimizer for task
@@ -495,8 +499,6 @@ class CLTrainer:
                         task_id=task_id,
                     )
                 )
-
-                print("done epoch")
 
                 train_losses[task_id].append(epoch_losses)
                 train_accuracies[task_id].append(epoch_accuracy)

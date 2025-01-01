@@ -69,7 +69,7 @@ def main(config: DictConfig) -> None:
     # Initialize trainer
     trainer = CLTrainer(
         model=model,
-        optimizer=optimizer,
+        optimizer_config=config.optimizer,
         criterion=criterion,
         save_dir=str(save_dir),
         num_tasks=config.data.num_tasks,
