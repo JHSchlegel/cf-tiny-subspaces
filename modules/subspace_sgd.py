@@ -351,10 +351,15 @@ class SubspaceSGD(SGD):
 
         # if not standard/vanilla SGD, project gradient onto subspace
         if subspace_type:
-            # Project gradient
-            flat_grad[: self.conv_param_size] = self._project_gradient(
-                flat_grad, subspace_type=subspace_type
-            )
+            if hasattr(self, "conv_param_size"):
+                # Project gradient
+                flat_grad[: self.conv_param_size] = self._project_gradient(
+                    flat_grad, subspace_type=subspace_type
+                )
+            else:
+                flat_grad = self._project_gradient(
+                    flat_grad, subspace_type=subspace_type
+                )
 
         # Unflatten and assign projected gradient back to parameters
         # i.e. update current gradients with projected gradients

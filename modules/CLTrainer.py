@@ -228,9 +228,6 @@ class CLTrainer:
         eigenvalues_list = []
 
         for batch_idx, (data, target) in enumerate(train_loader):
-            if batch_idx > 0:
-                break
-
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
