@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import logging
+from omegaconf import DictConfig, OmegaConf
 
 import os
 import sys
@@ -27,6 +28,7 @@ from utils.wandb_utils import setup_wandb
 from utils.reproducibility import set_all_seeds
 from utils.data_utils.continual_dataset import ContinualDataset
 from utils.metrics import compute_overlap
+from modules.subspace_sgd import SubspaceSGD
 
 
 # =========================================================================== #
@@ -43,8 +45,8 @@ class CLTrainer:
 
     def __init__(
         self,
+        optimizer_config: Dict,
         model: nn.Module,
-        optimizer: optim.Optimizer,
         criterion: nn.Module,
         save_dir: str,
         num_tasks: int,
@@ -63,30 +65,34 @@ class CLTrainer:
         wandb_config: Optional[Dict] = None,
     ) -> None:
         """
-        Initialize an instance of the Continual Learning Trainer.
-
         Args:
-            model: Neural network model being trained
-            optimizer: Custom-built subspace optimizer
-            criterion: Loss function used for training
-            save_dir: Directory path to save models and visualizations
-            num_tasks: Number of tasks in the continual learning setting
-            num_epochs: Number of epochs for training
-            log_interval: Interval for logging metrics during training
-            eval_freq: Frequency of evaluation on the test set
-            num_subsamples_Hessian: Number of samples of the train loader that will
-                be used for the Hessian (and eigenvalues/eigenvectors) computation.
-                If None, uses only the current batch instead of the subsampled
-                train loader. Defaults to 5_000.
-            checkpoint_freq: Frequency of saving model checkpoints
-            seed: Random seed for reproducibility
-            subspace_type: Type of subspace projection ("bulk" or "dominant")
-            scheduler: Learning rate scheduler
-            device: Device to run computations on
-            use_wandb: Whether to initialize wandb logging
-            wandb_log_dir: Logging directory for weights and biases
-            wandb_project: Project name of weights and biases
-            wandb_config: Configs used for run; saved in weights and biases
+            optimizer_config (Dict): Configuration dictionary for the optimizer setup
+            model (nn.Module): Neural network model to be trained
+            criterion (nn.Module): Loss function module
+            save_dir (str): Directory path for saving checkpoints and results
+            num_tasks (int): Number of continual learning tasks
+            num_epochs (int): Number of training epochs per task
+            log_interval (int): Frequency of logging training metrics (in iterations)
+            eval_freq (int): Frequency of evaluation (in epochs)
+            num_subsamples_Hessian (Optional[int]): Number of samples for Hessian computation.
+                Defaults to 5000.
+            checkpoint_freq (int): Frequency of model checkpointing (in epochs).
+                Defaults to 10.
+            seed (int): Random seed for reproducibility. Defaults to 42.
+            subspace_type (Optional[str]): Type of subspace restriction {'bulk', 'dominant', None}.
+                Defaults to None.
+            scheduler (Optional[_LRScheduler]): Learning rate scheduler.
+                Defaults to None.
+            device (str): Device to run the training on ('cuda' or 'cpu').
+                Defaults to 'cuda' if available, else 'cpu'.
+            use_wandb (bool): Whether to use Weights & Biases logging.
+                Defaults to True.
+            wandb_log_dir (Optional[str]): Directory for W&B logs.
+                Defaults to None.
+            wandb_project (Optional[str]): W&B project name.
+                Defaults to None.
+            wandb_config (Optional[Dict]): Additional configuration for W&B.
+                Defaults to None.
         """
         if subspace_type not in self.VALID_SUBSPACE_TYPES:
             raise ValueError(
@@ -94,8 +100,8 @@ class CLTrainer:
             )
 
         self.model = model.to(device)
-        self.optimizer = optimizer
         self.criterion = criterion
+        self.optimizer_config = optimizer_config
         self.scheduler = scheduler
         self.save_dir = Path(save_dir)
         self.num_epochs = num_epochs
@@ -127,7 +133,7 @@ class CLTrainer:
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
 
-        self.calculate_next_top_k = self.optimizer.calculate_next_top_k
+        self.calculate_next_top_k = self.optimizer_config.calculate_next_top_k
 
         self.eigenvectors = {i: [] for i in range(self.num_tasks - 1)}
         self.eigenvectors_next_top_k = (
@@ -142,9 +148,11 @@ class CLTrainer:
             else None
         )
         self.overlaps_bulk = {i: [] for i in range(self.num_tasks - 1)}
-        self.overlaps_bulk_next_k = {
-            i: [] for i in range(self.num_tasks - 1)
-        } if self.calculate_next_top_k else None
+        self.overlaps_bulk_next_k = (
+            {i: [] for i in range(self.num_tasks - 1)}
+            if self.calculate_next_top_k
+            else None
+        )
 
     def _subsample_train_loader(
         self,
@@ -220,13 +228,10 @@ class CLTrainer:
         for batch_idx, (data, target) in enumerate(train_loader):
 
             data, target = data.to(self.device), target.to(self.device)
-
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
-
             loss.backward()
-
             # Use the custom built optimizer. We pass a standard optimization
             # in the first epoch and perform gradient projection in later steps.
             self.optimizer.step(
@@ -293,7 +298,7 @@ class CLTrainer:
                     next_top_k_bulk_overlap = compute_overlap(
                         self.eigenvectors_next_top_k[id],
                         torch.from_numpy(eigenvectors_next_top_k).to(self.device),
-                        orthogonal_complement=True
+                        orthogonal_complement=True,
                     )
                     self.overlaps_bulk_next_k[id].append(next_top_k_bulk_overlap)
 
@@ -327,8 +332,6 @@ class CLTrainer:
         epoch_time = time.time() - start_time
         epoch_loss /= len(train_loader)
         epoch_accuracy = 100.0 * correct / total
-
-        del eigenvectors, eigenvectors_next_top_k
 
         # Log epoch metrics
         if wandb.run:
@@ -379,6 +382,7 @@ class CLTrainer:
         total_samples = {}
 
         for task_id, task_test_loader in test_loaders.items():
+            self.model._set_task(task_id)
             total_loss = 0
             correct = 0
             total_samples[task_id] = 0
@@ -470,6 +474,17 @@ class CLTrainer:
         top_k_eigenvalues = {i: [] for i in range(self.num_tasks)}
 
         for task_id in range(self.num_tasks):
+            
+            # Set which task we are training
+            self.model._set_task(task_id)
+
+            # Initialize optimizer for task
+            self.optimizer = SubspaceSGD(
+                nn.Sequential(*[self.model.conv_layers, self.model.fc[task_id]]),
+                criterion=self.criterion,
+                **OmegaConf.to_container(self.optimizer_config, resolve=True),
+            )
+
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
 
             logging.info(f"Training on Task {task_id}...")
@@ -608,12 +623,14 @@ class CLTrainer:
                     )
 
             if self.calculate_next_top_k and task_id < self.num_tasks - 1:
-                for step, (overlap, overlap_next, bulk_overlap, bulk_next) in enumerate(zip(
-                    self.overlaps[task_id], 
-                    self.overlaps_next_top_k[task_id],
-                    self.overlaps_bulk[task_id],
-                    self.overlaps_bulk_next_k[task_id],
-                )):
+                for step, (overlap, overlap_next, bulk_overlap, bulk_next) in enumerate(
+                    zip(
+                        self.overlaps[task_id],
+                        self.overlaps_next_top_k[task_id],
+                        self.overlaps_bulk[task_id],
+                        self.overlaps_bulk_next_k[task_id],
+                    )
+                ):
                     overlap_data.append(
                         {
                             "task_id": task_id,
