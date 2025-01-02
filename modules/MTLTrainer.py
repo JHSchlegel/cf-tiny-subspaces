@@ -275,12 +275,12 @@ class MTLTrainer:
                     wandb.log({
                         "train/top_eigenvalue": last_eigenvalues[0],
                         "train/eigenvalue_ratio": last_eigenvalues[0] / last_eigenvalues[-1],
-                        "train/mean_overlap": np.mean(self.overlaps[-100:]) if len(self.overlaps) > 0 else 0,
+                        "train/mean_overlap": np.mean(self.overlaps) if len(self.overlaps) > 0 else 0,
                     }, commit=False)
                     
                     if self.subspace_type == "bulk":
                         wandb.log({
-                            "train/mean_bulk_overlap": np.mean(self.overlaps_bulk[-100:]) if len(self.overlaps_bulk) > 0 else 0,
+                            "train/mean_bulk_overlap": np.mean(self.overlaps_bulk) if len(self.overlaps_bulk) > 0 else 0,
                         }, commit=False)
 
         return final_metrics
