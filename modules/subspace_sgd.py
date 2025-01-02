@@ -23,9 +23,8 @@ import numpy as np
 import os
 import sys
 
-
-from pytorch_hessian_eigenthings.hessian_eigenthings.lanczos import lanczos
-from pytorch_hessian_eigenthings.hessian_eigenthings.hvp_operator import HVPOperator
+from hessian_eigenthings import lanczos
+from hessian_eigenthings import HVPOperator
 
 
 # =========================================================================== #
@@ -147,6 +146,11 @@ class SubspaceSGD(SGD):
         # maximum number of Lanczos steps for calculation of the eigenbasis
         self.max_lanczos_steps = max_lanczos_steps
 
+        if hasattr(self.model, "conv_layers"):
+            self.conv_param_size = self.conv_param_size = sum(
+                p.numel() for p in self.model.conv_layers.parameters()
+            )
+
     @property
     def eigenthings(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -219,7 +223,9 @@ class SubspaceSGD(SGD):
                     pointer += num_param
 
     def _project_gradient(
-        self, flat_grad: torch.Tensor, subspace_type: Optional[str] = None
+        self,
+        flat_grad: torch.Tensor,
+        subspace_type: Optional[str] = None,
     ) -> torch.Tensor:
         """
         Project gradient onto the space spanned by the top-k eigenvectors or
@@ -236,17 +242,19 @@ class SubspaceSGD(SGD):
 
         # Calculate projections of gradient onto eigenbasis
         projections = torch.mv(
-            self.eigenvectors.T, torch.mv(self.eigenvectors, flat_grad)
+            self.eigenvectors.T,
+            torch.mv(self.eigenvectors, flat_grad[: self.eigenvectors.shape[1]]),
         )
 
         if subspace_type == "dominant":
             return projections
         elif subspace_type == "bulk":
-            return flat_grad - projections
+            return flat_grad[: self.eigenvectors.shape[1]] - projections
 
     def _update_eigenvectors(
         self,
         data_batch: Tuple[torch.Tensor, torch.Tensor],
+        subspace_model: Optional[nn.Module] = None,
         fp16: bool = False,
     ) -> None:
         """
@@ -254,12 +262,14 @@ class SubspaceSGD(SGD):
 
         Args:
             data_batch (Tuple[torch.Tensor, torch.Tensor]): Tuple of input and target tensors
+            subspace_model (Optional[nn.Module], optional): Model whose parameters are used for the
+                subspace projection. If None, use self.model, i.e., the full model. Defaults to None.
             fp16 (bool, optional): Whether to use half precision for the eigenthings
         """
         use_gpu = True if self.device.type == "cuda" else False
 
         hvp_operator = HVPOperator(
-            model=self.model,
+            model=subspace_model if subspace_model else self.model,
             data_source=data_batch,
             criterion=self.criterion,
             use_gpu=use_gpu,
@@ -274,27 +284,33 @@ class SubspaceSGD(SGD):
             max_steps=self.max_lanczos_steps,
         )
 
+        assert is_orthonormal_basis(
+            matrix=eigenvectors, device=self.device, tol=1e-4
+        ), "Eigenvectors are not orthonormal"
+
+        if hasattr(self.model, "conv_layers") and subspace_model:
+            # Trim eigenvectors to only include conv layer parameters
+            eigenvectors = eigenvectors[:, : self.conv_param_size]
+
         self.eigenvalues = (
-            eigenvalues[: self.k] if self.calculate_next_top_k else eigenvalues
+            eigenvalues[self.k :] if self.calculate_next_top_k else eigenvalues
         )
         self.eigenvectors = (
-            eigenvectors[: self.k] if self.calculate_next_top_k else eigenvectors
+            eigenvectors[self.k :] if self.calculate_next_top_k else eigenvectors
         )
 
         self.eigenvalues_next_top_k = (
-            eigenvalues[self.k :] if self.calculate_next_top_k else None
+            eigenvalues[: self.k] if self.calculate_next_top_k else None
         )
         self.eigenvectors_next_top_k = (
-            eigenvectors[self.k :] if self.calculate_next_top_k else None
+            eigenvectors[: self.k] if self.calculate_next_top_k else None
         )
 
-        assert is_orthonormal_basis(
-            matrix=self.eigenvectors, device=self.device, tol=1e-4
-        ), "Eigenvectors are not orthonormal"
         self.eigenvectors = torch.from_numpy(self.eigenvectors).to(self.device)
 
     def step(
         self,
+        subspace_model: Optional[nn.Module] = None,
         closure: Optional[Callable[[], float]] = None,
         data_batch: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         fp16: bool = False,
@@ -305,7 +321,10 @@ class SubspaceSGD(SGD):
         subspace as specified in 'subspace_type'.
 
         Args:
-            closure (Optional[Callable[[], float]], optional): _description_. Defaults to None.
+            subspace_model (Optional[nn.Module], optional): Model whose parameters are used for th
+                subspace projection. If None, use self.model, i.e., the full model. Defaults to None.
+            closure (Optional[Callable[[], float]], optional): Closure argument to make step
+                function consistent with step function of other Pytorch optimizers. Defaults to None.
             data_batch (Optional[Tuple[torch.Tensor, torch.Tensor]], optional):
                 Tuple of input and target tensors of the current batch.
                 Is used for calcuation of the Hessian and its eigenthings.
@@ -332,12 +351,19 @@ class SubspaceSGD(SGD):
         # Update eigenvectors/ eigenbasis that will be used for projection
         # uses zero_grad internally, hence cannot just interchange order of
         # flat_grad and update_eigenvectors
-        self._update_eigenvectors(data_batch, fp16=fp16)
+        self._update_eigenvectors(data_batch, fp16=fp16, subspace_model=subspace_model)
 
         # if not standard/vanilla SGD, project gradient onto subspace
         if subspace_type:
-            # Project gradient
-            flat_grad = self._project_gradient(flat_grad, subspace_type=subspace_type)
+            if hasattr(self, "conv_param_size") and subspace_model:
+                # Project gradient
+                flat_grad[: self.conv_param_size] = self._project_gradient(
+                    flat_grad, subspace_type=subspace_type
+                )
+            else:
+                flat_grad = self._project_gradient(
+                    flat_grad, subspace_type=subspace_type
+                )
 
         # Unflatten and assign projected gradient back to parameters
         # i.e. update current gradients with projected gradients

@@ -45,7 +45,7 @@ class CLTrainer:
 
     def __init__(
         self,
-        optimizer_config: Dict,
+        optimizer: SubspaceSGD,
         model: nn.Module,
         criterion: nn.Module,
         save_dir: str,
@@ -53,6 +53,7 @@ class CLTrainer:
         num_epochs: int,
         log_interval: int,
         eval_freq: int,
+        task_il: bool,
         num_subsamples_Hessian: Optional[int] = 5_000,
         checkpoint_freq: int = 10,
         seed: int = 42,
@@ -66,7 +67,7 @@ class CLTrainer:
     ) -> None:
         """
         Args:
-            optimizer_config (Dict): Configuration dictionary for the optimizer setup
+            optimizer (SubspaceSGD): Optimizer of SubspaceSGD type
             model (nn.Module): Neural network model to be trained
             criterion (nn.Module): Loss function module
             save_dir (str): Directory path for saving checkpoints and results
@@ -74,6 +75,7 @@ class CLTrainer:
             num_epochs (int): Number of training epochs per task
             log_interval (int): Frequency of logging training metrics (in iterations)
             eval_freq (int): Frequency of evaluation (in epochs)
+            task_il (bool): Whether the problem is of type task-il
             num_subsamples_Hessian (Optional[int]): Number of samples for Hessian computation.
                 Defaults to 5000.
             checkpoint_freq (int): Frequency of model checkpointing (in epochs).
@@ -101,7 +103,7 @@ class CLTrainer:
 
         self.model = model.to(device)
         self.criterion = criterion
-        self.optimizer_config = optimizer_config
+        self.optimizer = optimizer
         self.scheduler = scheduler
         self.save_dir = Path(save_dir)
         self.num_epochs = num_epochs
@@ -110,6 +112,7 @@ class CLTrainer:
         self.checkpoint_freq = checkpoint_freq
         self.subspace_type = subspace_type
         self.device = device
+        self.task_il = task_il  # whether problem is of type task-il
 
         # Create directories to save checkpoints
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -133,7 +136,7 @@ class CLTrainer:
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
 
-        self.calculate_next_top_k = self.optimizer_config.calculate_next_top_k
+        self.calculate_next_top_k = self.optimizer.calculate_next_top_k
 
         self.eigenvectors = {i: [] for i in range(self.num_tasks - 1)}
         self.eigenvectors_next_top_k = (
@@ -186,9 +189,9 @@ class CLTrainer:
         # return a new dataloader with the subsampled data
         return DataLoader(
             subdata,
-            batch_size=50,
+            batch_size=32,
             shuffle=False,
-            num_workers=0,
+            num_workers=4,
             pin_memory=False,
         )
 
@@ -226,12 +229,23 @@ class CLTrainer:
         eigenvalues_list = []
 
         for batch_idx, (data, target) in enumerate(train_loader):
-
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
             loss.backward()
+
+            # project gradients only onto CNN layers for task-il
+            if self.task_il:
+                assert hasattr(self.model, "conv_layers") and hasattr(
+                    self.model, "fc"
+                ), "Model must have 'conv_layers' and 'fc' attributes for task-il"
+                subspace_model = nn.Sequential(
+                    *[self.model.conv_layers, self.model.fc[task_id]]
+                )
+            else:
+                subspace_model = None
+
             # Use the custom built optimizer. We pass a standard optimization
             # in the first epoch and perform gradient projection in later steps.
             self.optimizer.step(
@@ -240,6 +254,7 @@ class CLTrainer:
                     if self.num_subsamples_Hessian
                     else (data, target)
                 ),
+                subspace_model=subspace_model,
                 fp16=False,
                 subspace_type=None if first_task else self.subspace_type,
             )
@@ -474,22 +489,16 @@ class CLTrainer:
         top_k_eigenvalues = {i: [] for i in range(self.num_tasks)}
 
         for task_id in range(self.num_tasks):
-            
+
             # Set which task we are training
             self.model._set_task(task_id)
-
-            # Initialize optimizer for task
-            self.optimizer = SubspaceSGD(
-                nn.Sequential(*[self.model.conv_layers, self.model.fc[task_id]]),
-                criterion=self.criterion,
-                **OmegaConf.to_container(self.optimizer_config, resolve=True),
-            )
 
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
 
             logging.info(f"Training on Task {task_id}...")
 
             for epoch in range(self.num_epochs):
+
                 # Train step
                 epoch_losses, epoch_accuracy, epoch_time, eigenvalues_list = (
                     self._train_epoch(
