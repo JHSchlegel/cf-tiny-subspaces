@@ -263,6 +263,8 @@ class SubspaceSGD(SGD):
 
         Args:
             data_batch (Tuple[torch.Tensor, torch.Tensor]): Tuple of input and target tensors
+            subspace_model (Optional[nn.Module], optional): Model whose parameters are used for the
+                subspace projection. If None, use self.model, i.e., the full model. Defaults to None.
             fp16 (bool, optional): Whether to use half precision for the eigenthings
         """
         use_gpu = True if self.device.type == "cuda" else False
@@ -320,7 +322,10 @@ class SubspaceSGD(SGD):
         subspace as specified in 'subspace_type'.
 
         Args:
-            closure (Optional[Callable[[], float]], optional): _description_. Defaults to None.
+            subspace_model (Optional[nn.Module], optional): Model whose parameters are used for th 
+                subspace projection. If None, use self.model, i.e., the full model. Defaults to None.
+            closure (Optional[Callable[[], float]], optional): Closure argument to make step 
+                function consistent with step function of other Pytorch optimizers. Defaults to None.
             data_batch (Optional[Tuple[torch.Tensor, torch.Tensor]], optional):
                 Tuple of input and target tensors of the current batch.
                 Is used for calcuation of the Hessian and its eigenthings.

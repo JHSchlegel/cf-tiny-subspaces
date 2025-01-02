@@ -67,7 +67,7 @@ class CLTrainer:
     ) -> None:
         """
         Args:
-            optimizer (SubspaceSGD): Configuration dictionary for the optimizer setup
+            optimizer (SubspaceSGD): Optimizer of SubspaceSGD type
             model (nn.Module): Neural network model to be trained
             criterion (nn.Module): Loss function module
             save_dir (str): Directory path for saving checkpoints and results
@@ -75,6 +75,7 @@ class CLTrainer:
             num_epochs (int): Number of training epochs per task
             log_interval (int): Frequency of logging training metrics (in iterations)
             eval_freq (int): Frequency of evaluation (in epochs)
+            task_il (bool): Whether the problem is of type task-il
             num_subsamples_Hessian (Optional[int]): Number of samples for Hessian computation.
                 Defaults to 5000.
             checkpoint_freq (int): Frequency of model checkpointing (in epochs).
