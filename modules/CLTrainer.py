@@ -234,8 +234,11 @@ class CLTrainer:
             loss = self.criterion(output, target)
             loss.backward()
 
-            # project only onto CNN layers for task-il
+            # project gradients only onto CNN layers for task-il
             if self.task_il:
+                assert hasattr(self.model, "conv_layers") and hasattr(
+                    self.model, "fc"
+                ), "Model must have 'conv_layers' and 'fc' attributes for task-il"
                 subspace_model = nn.Sequential(
                     *[self.model.conv_layers, self.model.fc[task_id]]
                 )

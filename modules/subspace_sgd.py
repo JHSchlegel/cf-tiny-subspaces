@@ -351,7 +351,7 @@ class SubspaceSGD(SGD):
 
         # if not standard/vanilla SGD, project gradient onto subspace
         if subspace_type:
-            if hasattr(self, "conv_param_size"):
+            if hasattr(self, "conv_param_size") and subspace_model:
                 # Project gradient
                 flat_grad[: self.conv_param_size] = self._project_gradient(
                     flat_grad, subspace_type=subspace_type
