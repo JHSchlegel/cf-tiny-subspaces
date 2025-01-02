@@ -29,7 +29,7 @@ training:
   subspace_type: null
   eval_freq: 1
   checkpoint_freq: 1
-  device: "cpu"
+  device: "cuda"
   num_subsamples_Hessian: 5_000
 
 wandb:
