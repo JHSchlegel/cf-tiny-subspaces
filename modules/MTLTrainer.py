@@ -181,22 +181,18 @@ class MTLTrainer:
                     iterators[task_name] = iter(train_loaders[task_name])
                     batch = next(iterators[task_name])
 
-                # Move batch to device
-                if isinstance(batch, (tuple, list)):
-                    batch = [b.to(self.device) for b in batch]
-                else:
-                    batch = batch.to(self.device)
+                data, target = batch
+                data, target = data.to(self.device), target.to(self.device)
 
-                # Forward pass without task name needed for model
-                outputs = self.model(batch[:-1])
-                loss = self.criteria[task_name](outputs, batch[-1])  # keep task name only for selecting correct loss function
+                outputs = self.model(data)
+                loss = self.criteria[task_name](outputs, target)                
                 weighted_loss = loss * self.task_weights[task_name]
                 total_loss += weighted_loss
 
                 # Update metrics
                 pred = outputs.argmax(dim=1, keepdim=True)
-                epoch_metrics[task_name]["correct"] += pred.eq(batch[-1].view_as(pred)).sum().item()
-                epoch_metrics[task_name]["total"] += batch[-1].size(0)
+                epoch_metrics[task_name]["correct"] += pred.eq(target.view_as(pred)).sum().item()
+                epoch_metrics[task_name]["total"] += target.size(0)                
                 epoch_metrics[task_name]["loss"] += loss.item()
 
             # Backward pass on combined loss
