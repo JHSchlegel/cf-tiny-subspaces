@@ -23,9 +23,8 @@ import numpy as np
 import os
 import sys
 
-
-from pytorch_hessian_eigenthings.hessian_eigenthings.lanczos import lanczos
-from pytorch_hessian_eigenthings.hessian_eigenthings.hvp_operator import HVPOperator
+from hessian_eigenthings import lanczos
+from hessian_eigenthings import HVPOperator
 
 
 # =========================================================================== #
@@ -322,9 +321,9 @@ class SubspaceSGD(SGD):
         subspace as specified in 'subspace_type'.
 
         Args:
-            subspace_model (Optional[nn.Module], optional): Model whose parameters are used for th 
+            subspace_model (Optional[nn.Module], optional): Model whose parameters are used for th
                 subspace projection. If None, use self.model, i.e., the full model. Defaults to None.
-            closure (Optional[Callable[[], float]], optional): Closure argument to make step 
+            closure (Optional[Callable[[], float]], optional): Closure argument to make step
                 function consistent with step function of other Pytorch optimizers. Defaults to None.
             data_batch (Optional[Tuple[torch.Tensor, torch.Tensor]], optional):
                 Tuple of input and target tensors of the current batch.
