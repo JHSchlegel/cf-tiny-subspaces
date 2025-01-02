@@ -56,3 +56,13 @@ class MLP(nn.Module):
         x = self.relu(self.hidden2(x))
         x = self.output(x)
         return x
+
+    def _set_task(self, task: int) -> None:
+        """
+        Place holder function for setting the current task; this way Trainer
+        is compatible with all models.
+
+        Args:
+            task (int): Id of current task.
+        """
+        pass
