@@ -30,7 +30,7 @@ training:
   eval_freq: 1
   checkpoint_freq: 1
   device: "cuda"
-  num_subsamples_Hessian: 5_000
+  num_subsamples_Hessian: 2_000
 
 wandb:
   enabled: True
