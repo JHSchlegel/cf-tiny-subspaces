@@ -9,7 +9,6 @@ data:
 model:
   in_channels: 3
   image_size: 32
-  hidden_dim: 100
   width: 32
 
 optimizer:
@@ -30,7 +29,7 @@ training:
   eval_freq: 1
   checkpoint_freq: 1
   device: "cuda"
-  num_subsamples_Hessian: 5_000
+  num_subsamples_Hessian: 2_000
 
 wandb:
   enabled: True
@@ -38,5 +37,5 @@ wandb:
 
 hydra: 
   run:
-    dir: "${hydra:runtime.cwd}/../results/split_cifar10/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/hidden_dim-${model.hidden_dim}/lr-${optimizer.lr}/seed-${training.seed}"
+    dir: "${hydra:runtime.cwd}/../results/split_cifar10/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/width-${model.width}/lr-${optimizer.lr}/seed-${training.seed}"
 

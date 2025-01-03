@@ -186,13 +186,18 @@ class CLTrainer:
         subdata = torch.utils.data.Subset(train_loader.dataset, random_indices)
         logging.info(f"Finished subsampling training data")
 
-        # return a new dataloader with the subsampled data
-        return DataLoader(
-            subdata,
-            batch_size=32,
-            shuffle=False,
-            num_workers=4,
-            pin_memory=False,
+        # return batch of subsampled data as dataloaders have huge overhead
+        # when used in pytorch-hessian-eigenthings
+        return next(
+            iter(
+                DataLoader(
+                    subdata,
+                    batch_size=num_samples,
+                    shuffle=False,
+                    num_workers=0,
+                    pin_memory=False,
+                )
+            )
         )
 
     def _train_epoch(
@@ -235,7 +240,7 @@ class CLTrainer:
             loss = self.criterion(output, target)
             loss.backward()
 
-            # project gradients only onto CNN layers for task-il
+            # project gradients only onto conv layers for task-il
             if self.task_il:
                 assert hasattr(self.model, "conv_layers") and hasattr(
                     self.model, "fc"
@@ -613,7 +618,7 @@ class CLTrainer:
                                 "value": (
                                     eigen_value.item()
                                     if isinstance(eigen_value, torch.Tensor)
-                                    else eigen_value[::-1]
+                                    else eigen_value[-1]
                                 ),
                             }
                         )
