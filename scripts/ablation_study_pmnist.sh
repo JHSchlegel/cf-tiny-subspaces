@@ -17,9 +17,9 @@ log_message() {
 }
 
 # Hyperparameter ranges
-HIDDEN_DIMS=(50 100 200) 
-BATCH_SIZES=(32 128 256)
-LEARNING_RATES=(0.001 0.01 0.1)
+HIDDEN_DIMS=(50 200) # default: 100; was already run separately
+BATCH_SIZES=(256 512) # default: 128; was already run separately
+LEARNING_RATES=(0.001 0.1) # default: 0.01; was already run separately
 
 # Function to run a single dataset experiment
 run_dataset_experiment() {
@@ -28,30 +28,30 @@ run_dataset_experiment() {
     local batch_size=$3
     local lr=$4
     local exp_name="hd-${hidden_dim}_bs-${batch_size}_lr-${lr}"
+    local num_epochs=$((5 * batch_size / 128))
 
     case $dataset in
     "pmnist")
         script_path="../train/train_permuted_mnist.py"
         config_name="permuted_mnist"
         ;;
-    "cifar10")
-        script_path="../train/train_split_cifar10.py"
-        config_name="split_cifar10"
-        ;;
-    "cifar100")
-        script_path="../train/train_split_cifar100.py"
-        config_name="split_cifar100"
-        ;;
     esac
 
     log_message "Running ${dataset} with configuration: ${exp_name}"
+    log_message "Number of epochs: $num_epochs"
 
     # Using Hydra's multirun feature with structured overrides
     python ${script_path} \
-        \
         model.hidden_dim=${hidden_dim} \
         data.batch_size=${batch_size} \
         optimizer.lr=${lr} \
+        optimizer.calculate_next_top_k=False \
+        optimizer.k=10 \
+        training.subspace_type=null \
+        training.calculate_overlap=True \
+        training.num_subsamples_Hessian=2000 \
+        data.num_tasks=10 \
+        training.num_epochs=${num_epochs} \
         wandb.project="ablation_${dataset}_${exp_name}" \
         hydra.run.dir="$BASE_DIR/${dataset}/${exp_name}" \
         hydra.sweep.dir="$BASE_DIR/${dataset}/${exp_name}" \
@@ -68,23 +68,21 @@ run_configuration() {
 
     log_message "Starting experiments for configuration: ${exp_name}"
 
-    screen -S "cl_ablation_${exp_name}" -d -m bash -c "
-        # Activate conda environment
-        eval "$(conda shell.bash hook)"
-        conda activate cf
+    #screen -S "cl_ablation_${exp_name}" -d -m bash -c "
+    # Activate conda environment
+    eval "$(conda shell.bash hook)"
+    conda activate cf
 
-        # Run each dataset
-        run_dataset_experiment 'pmnist' $hidden_dim $batch_size $lr
-        #run_dataset_experiment 'cifar10' $hidden_dim $batch_size $lr
-        #run_dataset_experiment 'cifar100' $hidden_dim $batch_size $lr
+    # Run each dataset
+    run_dataset_experiment 'pmnist' $hidden_dim $batch_size $lr
 
-        conda deactivate
-    "
+    conda deactivate
+    #"
 
     # Wait for screen session to complete
-    while screen -list | grep -q "cl_ablation_${exp_name}"; do
-        sleep 60
-    done
+    # while screen -list | grep -q "cl_ablation_${exp_name}"; do
+    #     sleep 1
+    # done
 }
 
 # Function to run ablation for a single hyperparameter
@@ -124,7 +122,7 @@ import os
 
 def collect_results():
     results = []
-    for dataset in ['pmnist', 'cifar10', 'cifar100']:
+    for dataset in ['pmnist']:
         for metrics_file in glob.glob(f'$BASE_DIR/{dataset}/*/metrics/forgetting_metrics.csv', recursive=True):
             exp_dir = metrics_file.split('/')[-3]  # Get experiment name from path
             print(exp_dir)
@@ -151,7 +149,7 @@ def collect_results():
                 'batch_size': bs,
                 'learning_rate': lr,
                 'average_accuracy': metrics_df['average_accuracy'].iloc[0],
-                'average_forgetting': metrics_df['forgetting'].iloc[0]
+                'average_forgetting': metrics_df['average_forgetting'].iloc[0]
             })
             print("results good")
     
@@ -164,7 +162,7 @@ summary_path = os.path.join('$BASE_DIR', 'ablation_summary.csv')
 results_df.to_csv(summary_path, index=False)
 
 # Print forgetting summary for each dataset
-for dataset in ['pmnist', 'cifar10', 'cifar100']:
+for dataset in ['pmnist']:
     dataset_df = results_df[results_df['dataset'] == dataset]
     
     print(f"\nBest configurations for {dataset.upper()}:")
