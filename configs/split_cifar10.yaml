@@ -37,5 +37,5 @@ wandb:
 
 hydra: 
   run:
-    dir: "${hydra:runtime.cwd}/../results/split_cifar10/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/hidden_dim-${model.hidden_dim}/lr-${optimizer.lr}/seed-${training.seed}"
+    dir: "${hydra:runtime.cwd}/../results/split_cifar10/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/width-${model.width}/lr-${optimizer.lr}/seed-${training.seed}"
 
