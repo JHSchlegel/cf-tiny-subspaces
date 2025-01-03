@@ -31,6 +31,8 @@ training:
   checkpoint_freq: 1
   device: "cuda"
   num_subsamples_Hessian: 2_000
+  calculate_overlap: True
+
 
 wandb:
   enabled: True
