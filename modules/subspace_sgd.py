@@ -273,7 +273,7 @@ class SubspaceSGD(SGD):
             data_source=data_batch,
             criterion=self.criterion,
             use_gpu=use_gpu,
-            full_dataset=False,
+            full_dataset=True,
             max_possible_gpu_samples=2**16,
         )
         eigenvalues, eigenvectors = lanczos(
@@ -283,6 +283,9 @@ class SubspaceSGD(SGD):
             fp16=fp16,
             max_steps=self.max_lanczos_steps,
         )
+
+        if isinstance(data_batch, (tuple, list)):
+            print(f"Data batch shape: {data_batch[0].shape}")
 
         assert is_orthonormal_basis(
             matrix=eigenvectors, device=self.device, tol=1e-4
