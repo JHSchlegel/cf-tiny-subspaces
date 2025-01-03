@@ -73,6 +73,7 @@ def main(config: DictConfig) -> None:
         log_interval=config.training.log_interval,
         eval_freq=config.training.get("eval_freq", 1),
         task_il=False,
+        calculate_overlap=config.training.get("calculate_overlap", True),
         num_subsamples_Hessian=config.training.get("num_subsamples_Hessian", 5_000),
         checkpoint_freq=config.training.get("checkpoint_freq", 10),
         seed=config.training.seed,

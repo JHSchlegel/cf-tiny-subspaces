@@ -54,6 +54,7 @@ class CLTrainer:
         log_interval: int,
         eval_freq: int,
         task_il: bool,
+        calculate_overlap: bool = True,
         num_subsamples_Hessian: Optional[int] = 5_000,
         checkpoint_freq: int = 10,
         seed: int = 42,
@@ -76,6 +77,7 @@ class CLTrainer:
             log_interval (int): Frequency of logging training metrics (in iterations)
             eval_freq (int): Frequency of evaluation (in epochs)
             task_il (bool): Whether the problem is of type task-il
+            calculate_overlap (bool): Whether to calculate overlap between subspaces. Defaults to True.
             num_subsamples_Hessian (Optional[int]): Number of samples for Hessian computation.
                 Defaults to 5000.
             checkpoint_freq (int): Frequency of model checkpointing (in epochs).
@@ -137,6 +139,7 @@ class CLTrainer:
         self.test_losses = {i: [] for i in range(self.num_tasks)}
 
         self.calculate_next_top_k = self.optimizer.calculate_next_top_k
+        self.calculate_overlap = calculate_overlap
 
         self.eigenvectors = {i: [] for i in range(self.num_tasks - 1)}
         self.eigenvectors_next_top_k = (
@@ -272,9 +275,11 @@ class CLTrainer:
                 )
 
             eigenvalues_list.append(
-                np.concatenate([eigenvalues, eigenvalues_next_top_k], axis=0)
+                np.concatenate(
+                    [eigenvalues[::-1], eigenvalues_next_top_k[::-1]], axis=0
+                )
                 if self.calculate_next_top_k
-                else eigenvalues
+                else eigenvalues[::-1]
             )
 
             if epoch == 0 and batch_idx == 0:
@@ -286,7 +291,7 @@ class CLTrainer:
                         eigenvectors_next_top_k
                     ).to(self.device)
 
-            if self.calculate_next_top_k:
+            if self.calculate_overlap:
                 for id in range(min(self.num_tasks - 1, task_id + 1)):
                     # Calculate dominant subspace overlap
                     top_k_overlap = compute_overlap(
@@ -305,26 +310,26 @@ class CLTrainer:
 
                     self.overlaps_bulk[id].append(bulk_overlap)
 
-                    # Next top-k dominant subspace overlap
-                    next_top_k_overlap = compute_overlap(
-                        self.eigenvectors_next_top_k[id],
-                        torch.from_numpy(eigenvectors_next_top_k).to(self.device),
-                        orthogonal_complement=False,
-                    )
+                    if self.calculate_next_top_k:
+                        # Next top-k dominant subspace overlap
+                        next_top_k_overlap = compute_overlap(
+                            self.eigenvectors_next_top_k[id],
+                            torch.from_numpy(eigenvectors_next_top_k).to(self.device),
+                            orthogonal_complement=False,
+                        )
 
-                    self.overlaps_next_top_k[id].append(next_top_k_overlap)
+                        self.overlaps_next_top_k[id].append(next_top_k_overlap)
 
-                    # Next top-k bulk subspace overlap
-                    next_top_k_bulk_overlap = compute_overlap(
-                        self.eigenvectors_next_top_k[id],
-                        torch.from_numpy(eigenvectors_next_top_k).to(self.device),
-                        orthogonal_complement=True,
-                    )
-                    self.overlaps_bulk_next_k[id].append(next_top_k_bulk_overlap)
+                        # Next top-k bulk subspace overlap
+                        next_top_k_bulk_overlap = compute_overlap(
+                            self.eigenvectors_next_top_k[id],
+                            torch.from_numpy(eigenvectors_next_top_k).to(self.device),
+                            orthogonal_complement=True,
+                        )
+                        self.overlaps_bulk_next_k[id].append(next_top_k_bulk_overlap)
 
                     logging.info(
                         f"Overlap between top-k eigenvectors of of first step of  task {id} and current step: {top_k_overlap}"
-                        f"Overlap between next top-k eigenvectors of first step of task {id} and current step: {next_top_k_overlap}"
                     )
 
             # Calculate accuracy
@@ -618,7 +623,7 @@ class CLTrainer:
                                 "value": (
                                     eigen_value.item()
                                     if isinstance(eigen_value, torch.Tensor)
-                                    else eigen_value[-1]
+                                    else eigen_value
                                 ),
                             }
                         )
@@ -636,25 +641,46 @@ class CLTrainer:
                         }
                     )
 
-            if self.calculate_next_top_k and task_id < self.num_tasks - 1:
-                for step, (overlap, overlap_next, bulk_overlap, bulk_next) in enumerate(
-                    zip(
-                        self.overlaps[task_id],
-                        self.overlaps_next_top_k[task_id],
-                        self.overlaps_bulk[task_id],
-                        self.overlaps_bulk_next_k[task_id],
-                    )
-                ):
-                    overlap_data.append(
-                        {
-                            "task_id": task_id,
-                            "step": step + task_id * self.num_epochs,
-                            "overlap_dominant": overlap,
-                            "overlap_next_top_k_dominant": overlap_next,
-                            "overlap_bulk": bulk_overlap,
-                            "overlap_next_top_k_bulk": bulk_next,
-                        }
-                    )
+            if self.calculate_overlap and task_id < self.num_tasks - 1:
+                if self.calculate_next_top_k:
+                    for step, (
+                        overlap,
+                        overlap_next,
+                        bulk_overlap,
+                        bulk_next,
+                    ) in enumerate(
+                        zip(
+                            self.overlaps[task_id],
+                            self.overlaps_next_top_k[task_id],
+                            self.overlaps_bulk[task_id],
+                            self.overlaps_bulk_next_k[task_id],
+                        )
+                    ):
+                        overlap_data.append(
+                            {
+                                "task_id": task_id,
+                                "step": step + task_id * self.num_epochs,
+                                "overlap_dominant": overlap,
+                                "overlap_next_top_k_dominant": overlap_next,
+                                "overlap_bulk": bulk_overlap,
+                                "overlap_next_top_k_bulk": bulk_next,
+                            }
+                        )
+                else:
+                    for step, (overlap, bulk_overlap) in enumerate(
+                        zip(
+                            self.overlaps[task_id],
+                            self.overlaps_bulk[task_id],
+                        )
+                    ):
+                        overlap_data.append(
+                            {
+                                "task_id": task_id,
+                                "step": step + task_id * self.num_epochs,
+                                "overlap_dominant": overlap,
+                                "overlap_bulk": bulk_overlap,
+                            }
+                        )
 
         # create dataframes for saving
         train_df = pd.DataFrame(train_data)
