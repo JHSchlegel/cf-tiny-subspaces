@@ -618,7 +618,7 @@ class CLTrainer:
                                 "value": (
                                     eigen_value.item()
                                     if isinstance(eigen_value, torch.Tensor)
-                                    else eigen_value[::-1]
+                                    else eigen_value[-1]
                                 ),
                             }
                         )
