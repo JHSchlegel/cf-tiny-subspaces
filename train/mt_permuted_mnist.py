@@ -49,11 +49,7 @@ def main(config: DictConfig) -> None:
         # Get the datasets from loaders
         train_dataset = pmnist.train_loaders[task_id].dataset
         test_dataset = pmnist.test_loaders[task_id].dataset
-        
-        # Modify targets to create separate classes for each permutation
-        train_dataset.targets = train_dataset.targets + (task_id * 10)
-        test_dataset.targets = test_dataset.targets + (task_id * 10)
-        
+                
         train_datasets.append(train_dataset)
         test_datasets.append(test_dataset)
 
@@ -81,7 +77,7 @@ def main(config: DictConfig) -> None:
     # Initialize model; adjust output dimension for all permutations
     model = MLP(
         input_dim=config.model.input_dim,
-        output_dim=10 * config.data.num_tasks,  # i.e., 10 classes per permutation/task
+        output_dim=config.model.output_dim, 
         hidden_dim=config.model.hidden_dim,
     )
     model.to(config.training.get("device", "cuda"))

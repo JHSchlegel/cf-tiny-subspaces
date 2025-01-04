@@ -8,6 +8,7 @@ data:
 model:
   input_dim: 784
   hidden_dim: 100
+  output_dim: 10
 
 optimizer:
   lr: 0.01
