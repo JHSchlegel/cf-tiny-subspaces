@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore")
 # =========================================================================== #
 #                          Main Training Function                             #
 # =========================================================================== #
-@hydra.main(config_path="../configs", config_name="mt_permuted_mnist")
+@hydra.main(config_path="../configs", config_name="multitask_permuted_mnist")
 def main(config: DictConfig) -> None:
     """
     Main training function with Hydra configuration for unified multi-task learning.
