@@ -28,8 +28,8 @@ training:
 
 wandb:
   enabled: True
-  project: "multitask_permuted_mnist_${training.subspace_type}"
+  project: "mt_permuted_mnist_${training.subspace_type}"
 
 hydra:
   run:
-    dir: "${hydra:runtime.cwd}/../results/multitask_permuted_mnist/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/hidden_dim-${model.hidden_dim}/lr-${optimizer.lr}/seed-${training.seed}"
+    dir: "${hydra:runtime.cwd}/../results/mt_permuted_mnist/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/hidden_dim-${model.hidden_dim}/lr-${optimizer.lr}/seed-${training.seed}"
