@@ -33,7 +33,7 @@ class MTLTrainer:
     """
     Multi-task Learning Trainer implementation that treats all tasks as a single
     classification problem. This class provides comprehensive training, evaluation,
-    metric tracking, and eigenvalue analysis capabilities integrated with wandb logging.
+    and metric tracking capabilities integrated with wandb logging.
     """
     
     VALID_SUBSPACE_TYPES = {"bulk", "dominant", None}
@@ -152,7 +152,6 @@ class MTLTrainer:
             self.optimizer.zero_grad()
             loss.backward()
             
-            # Step with eigenvalue calculation
             self.optimizer.step(
                 fp16=False,
                 subspace_type=self.subspace_type
