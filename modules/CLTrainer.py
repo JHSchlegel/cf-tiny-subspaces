@@ -45,7 +45,7 @@ class CLTrainer:
 
     def __init__(
         self,
-        optimizer_config: Dict,
+        optimizer: SubspaceSGD,
         model: nn.Module,
         criterion: nn.Module,
         save_dir: str,
@@ -53,6 +53,8 @@ class CLTrainer:
         num_epochs: int,
         log_interval: int,
         eval_freq: int,
+        task_il: bool,
+        calculate_overlap: bool = True,
         num_subsamples_Hessian: Optional[int] = 5_000,
         checkpoint_freq: int = 10,
         seed: int = 42,
@@ -66,7 +68,7 @@ class CLTrainer:
     ) -> None:
         """
         Args:
-            optimizer_config (Dict): Configuration dictionary for the optimizer setup
+            optimizer (SubspaceSGD): Optimizer of SubspaceSGD type
             model (nn.Module): Neural network model to be trained
             criterion (nn.Module): Loss function module
             save_dir (str): Directory path for saving checkpoints and results
@@ -74,6 +76,8 @@ class CLTrainer:
             num_epochs (int): Number of training epochs per task
             log_interval (int): Frequency of logging training metrics (in iterations)
             eval_freq (int): Frequency of evaluation (in epochs)
+            task_il (bool): Whether the problem is of type task-il
+            calculate_overlap (bool): Whether to calculate overlap between subspaces. Defaults to True.
             num_subsamples_Hessian (Optional[int]): Number of samples for Hessian computation.
                 Defaults to 5000.
             checkpoint_freq (int): Frequency of model checkpointing (in epochs).
@@ -101,7 +105,7 @@ class CLTrainer:
 
         self.model = model.to(device)
         self.criterion = criterion
-        self.optimizer_config = optimizer_config
+        self.optimizer = optimizer
         self.scheduler = scheduler
         self.save_dir = Path(save_dir)
         self.num_epochs = num_epochs
@@ -110,6 +114,7 @@ class CLTrainer:
         self.checkpoint_freq = checkpoint_freq
         self.subspace_type = subspace_type
         self.device = device
+        self.task_il = task_il  # whether problem is of type task-il
 
         # Create directories to save checkpoints
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -133,7 +138,8 @@ class CLTrainer:
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
 
-        self.calculate_next_top_k = self.optimizer_config.calculate_next_top_k
+        self.calculate_next_top_k = self.optimizer.calculate_next_top_k
+        self.calculate_overlap = calculate_overlap
 
         self.eigenvectors = {i: [] for i in range(self.num_tasks - 1)}
         self.eigenvectors_next_top_k = (
@@ -183,13 +189,18 @@ class CLTrainer:
         subdata = torch.utils.data.Subset(train_loader.dataset, random_indices)
         logging.info(f"Finished subsampling training data")
 
-        # return a new dataloader with the subsampled data
-        return DataLoader(
-            subdata,
-            batch_size=50,
-            shuffle=False,
-            num_workers=0,
-            pin_memory=False,
+        # return batch of subsampled data as dataloaders have huge overhead
+        # when used in pytorch-hessian-eigenthings
+        return next(
+            iter(
+                DataLoader(
+                    subdata,
+                    batch_size=num_samples,
+                    shuffle=False,
+                    num_workers=0,
+                    pin_memory=False,
+                )
+            )
         )
 
     def _train_epoch(
@@ -226,12 +237,23 @@ class CLTrainer:
         eigenvalues_list = []
 
         for batch_idx, (data, target) in enumerate(train_loader):
-
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = self.criterion(output, target)
             loss.backward()
+
+            # project gradients only onto conv layers for task-il
+            if self.task_il:
+                assert hasattr(self.model, "conv_layers") and hasattr(
+                    self.model, "fc"
+                ), "Model must have 'conv_layers' and 'fc' attributes for task-il"
+                subspace_model = nn.Sequential(
+                    *[self.model.conv_layers, self.model.fc[task_id]]
+                )
+            else:
+                subspace_model = None
+
             # Use the custom built optimizer. We pass a standard optimization
             # in the first epoch and perform gradient projection in later steps.
             self.optimizer.step(
@@ -240,6 +262,7 @@ class CLTrainer:
                     if self.num_subsamples_Hessian
                     else (data, target)
                 ),
+                subspace_model=subspace_model,
                 fp16=False,
                 subspace_type=None if first_task else self.subspace_type,
             )
@@ -252,9 +275,11 @@ class CLTrainer:
                 )
 
             eigenvalues_list.append(
-                np.concatenate([eigenvalues, eigenvalues_next_top_k], axis=0)
+                np.concatenate(
+                    [eigenvalues[::-1], eigenvalues_next_top_k[::-1]], axis=0
+                )
                 if self.calculate_next_top_k
-                else eigenvalues
+                else eigenvalues[::-1]
             )
 
             if epoch == 0 and batch_idx == 0:
@@ -266,7 +291,7 @@ class CLTrainer:
                         eigenvectors_next_top_k
                     ).to(self.device)
 
-            if self.calculate_next_top_k:
+            if self.calculate_overlap:
                 for id in range(min(self.num_tasks - 1, task_id + 1)):
                     # Calculate dominant subspace overlap
                     top_k_overlap = compute_overlap(
@@ -285,26 +310,26 @@ class CLTrainer:
 
                     self.overlaps_bulk[id].append(bulk_overlap)
 
-                    # Next top-k dominant subspace overlap
-                    next_top_k_overlap = compute_overlap(
-                        self.eigenvectors_next_top_k[id],
-                        torch.from_numpy(eigenvectors_next_top_k).to(self.device),
-                        orthogonal_complement=False,
-                    )
+                    if self.calculate_next_top_k:
+                        # Next top-k dominant subspace overlap
+                        next_top_k_overlap = compute_overlap(
+                            self.eigenvectors_next_top_k[id],
+                            torch.from_numpy(eigenvectors_next_top_k).to(self.device),
+                            orthogonal_complement=False,
+                        )
 
-                    self.overlaps_next_top_k[id].append(next_top_k_overlap)
+                        self.overlaps_next_top_k[id].append(next_top_k_overlap)
 
-                    # Next top-k bulk subspace overlap
-                    next_top_k_bulk_overlap = compute_overlap(
-                        self.eigenvectors_next_top_k[id],
-                        torch.from_numpy(eigenvectors_next_top_k).to(self.device),
-                        orthogonal_complement=True,
-                    )
-                    self.overlaps_bulk_next_k[id].append(next_top_k_bulk_overlap)
+                        # Next top-k bulk subspace overlap
+                        next_top_k_bulk_overlap = compute_overlap(
+                            self.eigenvectors_next_top_k[id],
+                            torch.from_numpy(eigenvectors_next_top_k).to(self.device),
+                            orthogonal_complement=True,
+                        )
+                        self.overlaps_bulk_next_k[id].append(next_top_k_bulk_overlap)
 
                     logging.info(
                         f"Overlap between top-k eigenvectors of of first step of  task {id} and current step: {top_k_overlap}"
-                        f"Overlap between next top-k eigenvectors of first step of task {id} and current step: {next_top_k_overlap}"
                     )
 
             # Calculate accuracy
@@ -474,22 +499,16 @@ class CLTrainer:
         top_k_eigenvalues = {i: [] for i in range(self.num_tasks)}
 
         for task_id in range(self.num_tasks):
-            
+
             # Set which task we are training
             self.model._set_task(task_id)
-
-            # Initialize optimizer for task
-            self.optimizer = SubspaceSGD(
-                nn.Sequential(*[self.model.conv_layers, self.model.fc[task_id]]),
-                criterion=self.criterion,
-                **OmegaConf.to_container(self.optimizer_config, resolve=True),
-            )
 
             train_loader, test_loaders = cl_dataset.get_task_dataloaders(task_id)
 
             logging.info(f"Training on Task {task_id}...")
 
             for epoch in range(self.num_epochs):
+
                 # Train step
                 epoch_losses, epoch_accuracy, epoch_time, eigenvalues_list = (
                     self._train_epoch(
@@ -604,7 +623,7 @@ class CLTrainer:
                                 "value": (
                                     eigen_value.item()
                                     if isinstance(eigen_value, torch.Tensor)
-                                    else eigen_value[::-1]
+                                    else eigen_value
                                 ),
                             }
                         )
@@ -622,25 +641,46 @@ class CLTrainer:
                         }
                     )
 
-            if self.calculate_next_top_k and task_id < self.num_tasks - 1:
-                for step, (overlap, overlap_next, bulk_overlap, bulk_next) in enumerate(
-                    zip(
-                        self.overlaps[task_id],
-                        self.overlaps_next_top_k[task_id],
-                        self.overlaps_bulk[task_id],
-                        self.overlaps_bulk_next_k[task_id],
-                    )
-                ):
-                    overlap_data.append(
-                        {
-                            "task_id": task_id,
-                            "step": step + task_id * self.num_epochs,
-                            "overlap_dominant": overlap,
-                            "overlap_next_top_k_dominant": overlap_next,
-                            "overlap_bulk": bulk_overlap,
-                            "overlap_next_top_k_bulk": bulk_next,
-                        }
-                    )
+            if self.calculate_overlap and task_id < self.num_tasks - 1:
+                if self.calculate_next_top_k:
+                    for step, (
+                        overlap,
+                        overlap_next,
+                        bulk_overlap,
+                        bulk_next,
+                    ) in enumerate(
+                        zip(
+                            self.overlaps[task_id],
+                            self.overlaps_next_top_k[task_id],
+                            self.overlaps_bulk[task_id],
+                            self.overlaps_bulk_next_k[task_id],
+                        )
+                    ):
+                        overlap_data.append(
+                            {
+                                "task_id": task_id,
+                                "step": step + task_id * self.num_epochs,
+                                "overlap_dominant": overlap,
+                                "overlap_next_top_k_dominant": overlap_next,
+                                "overlap_bulk": bulk_overlap,
+                                "overlap_next_top_k_bulk": bulk_next,
+                            }
+                        )
+                else:
+                    for step, (overlap, bulk_overlap) in enumerate(
+                        zip(
+                            self.overlaps[task_id],
+                            self.overlaps_bulk[task_id],
+                        )
+                    ):
+                        overlap_data.append(
+                            {
+                                "task_id": task_id,
+                                "step": step + task_id * self.num_epochs,
+                                "overlap_dominant": overlap,
+                                "overlap_bulk": bulk_overlap,
+                            }
+                        )
 
         # create dataframes for saving
         train_df = pd.DataFrame(train_data)

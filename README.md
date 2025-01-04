@@ -23,8 +23,10 @@ This repository includes the "hessian_eigenthings" as a submodule; after cloning
 ```bash 
 git submodule init 
 git submodule update
+cd pytorch_hessian_eigenthings
+pip install -e .
 ```
-to initialize and update the submodule.
+to initialize, update and install the submodule.
 
 ## Source Code Structure
 ```bash

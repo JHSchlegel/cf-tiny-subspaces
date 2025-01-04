@@ -20,6 +20,7 @@ from utils.data_utils.permuted_mnist import PermutedMNIST
 # Ignore annoying hydra warnings
 warnings.filterwarnings("ignore")
 
+
 # =========================================================================== #
 #                          Main Training Function                             #
 # =========================================================================== #
@@ -71,6 +72,8 @@ def main(config: DictConfig) -> None:
         num_epochs=config.training.num_epochs,
         log_interval=config.training.log_interval,
         eval_freq=config.training.get("eval_freq", 1),
+        task_il=False,
+        calculate_overlap=config.training.get("calculate_overlap", True),
         num_subsamples_Hessian=config.training.get("num_subsamples_Hessian", 5_000),
         checkpoint_freq=config.training.get("checkpoint_freq", 10),
         seed=config.training.seed,
@@ -85,16 +88,14 @@ def main(config: DictConfig) -> None:
     try:
         # Train and evaluate
         (
-            avg_accuracy, 
-            avg_max_forgetting, 
-            train_losses, 
-            train_accuracies, 
-            test_accuracies, 
-            test_losses, 
-            eigenvalues 
-        ) = (
-            trainer.train_and_evaluate(pmnist)
-        )
+            avg_accuracy,
+            avg_max_forgetting,
+            train_losses,
+            train_accuracies,
+            test_accuracies,
+            test_losses,
+            eigenvalues,
+        ) = trainer.train_and_evaluate(pmnist)
 
         print(f"Test accuracies: {test_accuracies}")
         print(f"Test losses: {test_losses}")

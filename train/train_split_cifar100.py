@@ -52,7 +52,7 @@ def main(config: DictConfig) -> None:
     model = CNN(
         width=config.model.width,
         num_tasks=config.data.num_tasks,
-        classes_per_task=config.data.classes_per_task
+        classes_per_task=config.data.classes_per_task,
     )
     model.to(config.training.get("device", "cuda"))
 
@@ -69,13 +69,15 @@ def main(config: DictConfig) -> None:
     # Initialize trainer
     trainer = CLTrainer(
         model=model,
-        optimizer_config=config.optimizer,
+        optimizer=optimizer,
         criterion=criterion,
         save_dir=str(save_dir),
         num_tasks=config.data.num_tasks,
         num_epochs=config.training.num_epochs,
         log_interval=config.training.log_interval,
         eval_freq=config.training.get("eval_freq", 1),
+        task_il=True,
+        calculate_overlap=config.training.get("calculate_overlap", True),
         num_subsamples_Hessian=config.training.get("num_subsamples_Hessian", 5_000),
         checkpoint_freq=config.training.get("checkpoint_freq", 10),
         seed=config.training.seed,
