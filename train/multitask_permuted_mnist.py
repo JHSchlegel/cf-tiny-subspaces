@@ -40,22 +40,14 @@ def main(config: DictConfig) -> None:
         data_root=config.data.get("data_root", "./data"),
         num_workers=config.data.get("num_workers", 4),
     )
-
-    # Combine all task datasets into one
-    train_datasets = []
-    test_datasets = []
     
-    for task_id in range(config.data.num_tasks):
-        # Get the datasets from loaders
-        train_dataset = pmnist.train_loaders[task_id].dataset
-        test_dataset = pmnist.test_loaders[task_id].dataset
-                
-        train_datasets.append(train_dataset)
-        test_datasets.append(test_dataset)
-
-    # Combine all datasets
-    combined_train_dataset = ConcatDataset(train_datasets)
-    combined_test_dataset = ConcatDataset(test_datasets)
+    # Combine all task datasets into one
+    combined_train_dataset = ConcatDataset([
+        pmnist.train_loaders[task_id].dataset for task_id in range(config.data.num_tasks)
+    ])
+    combined_test_dataset = ConcatDataset([
+        pmnist.test_loaders[task_id].dataset for task_id in range(config.data.num_tasks)
+    ])
 
     # Create unified dataloaders
     train_loader = DataLoader(
@@ -74,7 +66,7 @@ def main(config: DictConfig) -> None:
         pin_memory=True
     )
 
-    # Initialize model; adjust output dimension for all permutations
+    # Initialize model
     model = MLP(
         input_dim=config.model.input_dim,
         output_dim=config.model.output_dim, 
