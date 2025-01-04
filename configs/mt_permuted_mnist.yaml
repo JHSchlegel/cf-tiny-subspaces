@@ -1,0 +1,34 @@
+data:
+  seed: 42
+  num_tasks: 10 
+  data_root: "${hydra:runtime.cwd}/../data"
+  num_workers: 4
+  batch_size: 128
+
+model:
+  input_dim: 784
+  hidden_dim: 100
+
+optimizer:
+  lr: 0.01
+  weight_decay: 0.0
+  momentum: 0.0
+  dampening: 0.0
+  nesterov: False
+
+training:
+  seed: 42
+  num_epochs: 5
+  log_interval: 10
+  subspace_type: null
+  eval_freq: 1
+  checkpoint_freq: 1
+  device: "cuda"
+
+wandb:
+  enabled: True
+  project: "multitask_permuted_mnist_${training.subspace_type}"
+
+hydra:
+  run:
+    dir: "${hydra:runtime.cwd}/../results/multitask_permuted_mnist/subspace-${training.subspace_type}/k-${optimizer.k}/batch_size-${data.batch_size}/hidden_dim-${model.hidden_dim}/lr-${optimizer.lr}/seed-${training.seed}"
