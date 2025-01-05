@@ -11,6 +11,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple
 import random
+from utils.reproducibility import set_all_seeds
+
 
 # =========================================================================== #
 #            An Abstract Class Dataset for Continual Learning                 #
@@ -37,6 +39,7 @@ class ContinualDataset(ABC):
 
         # set seeds for reproducibility:
         self.rng = np.random.default_rng(seed)
+        set_all_seeds(seed)
 
         self.train_loaders = {}
         self.test_loaders = {}
