@@ -40,9 +40,9 @@ class MTLTrainer:
 
     def __init__(
         self,
-        optimizer: SubspaceSGD,
+        optimizer: optim.Optimizer,
         model: nn.Module,
-        criterion: Dict[str, nn.Module],
+        criterion: nn.Module,
         save_dir: str,
         num_epochs: int = 100,
         log_interval: int = 10,
@@ -152,10 +152,7 @@ class MTLTrainer:
             self.optimizer.zero_grad()
             loss.backward()
             
-            self.optimizer.step(
-                fp16=False,
-                subspace_type=self.subspace_type
-            )
+            self.optimizer.step()
             
             # Update metrics
             total_loss += loss.item()
