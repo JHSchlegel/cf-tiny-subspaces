@@ -4,12 +4,11 @@ data:
   num_tasks: 10
   data_root: "${hydra:runtime.cwd}/../data"
   num_workers: 4
-  batch_size: 32
+  batch_size: 128
 
 model:
   in_channels: 3
   image_size: 32
-  hidden_dim: 100
   width: 32
 
 optimizer:
