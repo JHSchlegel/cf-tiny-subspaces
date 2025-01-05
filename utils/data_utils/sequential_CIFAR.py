@@ -38,11 +38,11 @@ class CL_CIFAR100(ContinualDataset):
 
         assert num_tasks * classes_per_task <= 100, "Configuration of classes_per_task and num_tasks exceeds maximal number of classes available"
         self.classes_per_task = classes_per_task
-        self.class_order = np.random.choice(100, size = num_tasks * self.classes_per_task, replace=False)
+        self.class_order = self.rng.choice(100, size = num_tasks * self.classes_per_task, replace=False)
 
     def setup_tasks(self, batch_size:int, data_root:str="./data", num_workers:int=4) -> None:
         """
-        Create training and test dataloaders for all tasks
+        Create training and test dataloaders for all tasksrandom
 
         Args:
             batch_size (int): Batch size.
@@ -103,7 +103,7 @@ class CL_CIFAR10(ContinualDataset):
 
         assert num_tasks * classes_per_task <= 10, "Configuration of classes_per_task and num_tasks exceeds maximal number of classes available"       
         self.classes_per_task = classes_per_task
-        self.class_order = np.random.choice(10, size = num_tasks * self.classes_per_task, replace=False)
+        self.class_order = self.rng.choice(10, size = num_tasks * self.classes_per_task, replace=False)
     
     def setup_tasks(self, batch_size:int, data_root:str="./data", num_workers:int=4) -> None:
         """
