@@ -687,7 +687,7 @@ class CLTrainer:
         test_df = pd.DataFrame(test_data)
         eigenvalue_df = pd.DataFrame(eigenvalue_data).explode("value")
 
-        if self.calculate_next_top_k:
+        if self.calculate_overlap:
             print(f"{overlap_data=}")
             overlap_df = pd.DataFrame(overlap_data)
             print(overlap_df)
