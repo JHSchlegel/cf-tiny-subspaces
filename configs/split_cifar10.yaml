@@ -4,7 +4,7 @@ data:
   num_tasks: 5
   data_root: "${hydra:runtime.cwd}/../data"
   num_workers: 4
-  batch_size: 32
+  batch_size: 128
 
 model:
   in_channels: 3

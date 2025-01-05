@@ -144,7 +144,8 @@ class MTLTrainer:
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
         for batch_idx, (data, target) in enumerate(pbar):
-            data, target = data.to(self.device), target.to(self.device)
+            data = data.to(self.device)
+            target = target.to(self.device) if isinstance(target, torch.Tensor) else torch.Tensor(target).to(self.device)
 
             outputs = self.model(data)
             loss = self.criterion(outputs, target)

@@ -13,7 +13,7 @@ import torch.nn as nn
 
 
 class CNN(nn.Module):
-    """A CNN architecture for multi-task learning with shared convolutional layers
+    """A CNN architecture for Continual Learning with shared convolutional layers
     and task-specific fully connected layers.
 
     The network architecture consists of:
@@ -94,3 +94,63 @@ class CNN(nn.Module):
         
         features = self.conv_layers(x)
         return self.fc[self.task](features)
+    
+
+
+class MultCNN(nn.Module):
+    """A CNN architecture for unified Multi-task Learning with
+    a single fully connected layer for classification.
+
+    The network architecture consists of:
+        - Two convolutional layers with ReLU activation and max pooling
+        - Single fully connected layer for all classes combined
+
+    Attributes:
+        feature_dim (int): Dimension of the flattened feature space after convolutions
+        conv_layers (nn.Sequential): Shared convolutional layers
+        fc (nn.Sequential): Single fully connected classifier for all classes
+    """
+
+    def __init__(
+        self,
+        width: int = 32,
+        num_classes: int = 10
+    ) -> None:
+        """Initialize the CNN architecture.
+
+        Args:
+            width (int, optional): Number of filters in convolutional layers.
+                Defaults to 32.
+            num_classes (int, optional): Total number of classes for classification.
+                Defaults to 10.
+        """
+        super(MultCNN, self).__init__()
+        self.feature_dim = width * 64 
+
+        # Convolutional layers
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(3, width, kernel_size=3, padding=1, bias=True),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(width, width, kernel_size=3, padding=1, bias=True),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+        )
+
+        # Single fully connected layer for all classes
+        self.fc = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(self.feature_dim, num_classes)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass of the network.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, 3, H, W)
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_classes)
+        """
+        features = self.conv_layers(x)
+        return self.fc(features)
