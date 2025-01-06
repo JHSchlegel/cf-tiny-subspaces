@@ -288,7 +288,7 @@ class SubspaceSGD(SGD):
             data_source=data_batch,
             criterion=self.criterion,
             use_gpu=use_gpu,
-            full_dataset=True,
+            full_dataset=False,
             max_possible_gpu_samples=2**16,
         )
         eigenvalues, eigenvectors = lanczos(
