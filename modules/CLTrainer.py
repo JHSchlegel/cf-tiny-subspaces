@@ -27,8 +27,34 @@ import wandb
 from utils.wandb_utils import setup_wandb
 from utils.reproducibility import set_all_seeds
 from utils.data_utils.continual_dataset import ContinualDataset
+from utils.data_utils.permuted_mnist import PermutedMNIST
 from utils.metrics import compute_overlap
 from modules.subspace_sgd import SubspaceSGD
+
+
+from torch.utils.data import Dataset
+
+
+class GPUDataset(Dataset):
+    """
+    A PyTorch Dataset for preloading data onto the GPU.
+
+    This class is useful for cases where loading data onto the GPU during each batch 
+    introduces significant overhead, especially with standard DataLoaders. By moving 
+    all data to the GPU during initialization, it minimizes the latency introduced 
+    by data transfer. This drastically increases the speed of eigenvalue computation.
+    """
+    def __init__(self, dataset, device):
+        self.data = []
+        for idx in range(len(dataset)):
+            x, y = dataset[idx]
+            self.data.append((x.to(device), y))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
 
 
 # =========================================================================== #
@@ -160,6 +186,9 @@ class CLTrainer:
             else None
         )
 
+        # for permuted MNIST, a different way of approximating the Hessian worked better:
+        self.is_permuted_mnist = False
+
     def _subsample_train_loader(
         self,
         train_loader: DataLoader,
@@ -189,18 +218,14 @@ class CLTrainer:
         subdata = torch.utils.data.Subset(train_loader.dataset, random_indices)
         logging.info(f"Finished subsampling training data")
 
-        # return batch of subsampled data as dataloaders have huge overhead
-        # when used in pytorch-hessian-eigenthings
-        return next(
-            iter(
-                DataLoader(
-                    subdata,
-                    batch_size=num_samples,
-                    shuffle=False,
-                    num_workers=0,
-                    pin_memory=False,
-                )
-            )
+
+        # Note: We found batch size of 32 to work better for permuted mnist compared to batch size of 500
+        return DataLoader(
+            GPUDataset(subdata, self.device),
+            batch_size=32 if self.is_permuted_mnist else 500,
+            shuffle=True,
+            num_workers=0,
+            pin_memory=False,
         )
 
     def _train_epoch(
@@ -492,6 +517,7 @@ class CLTrainer:
                 Dict[int, List[float]]: Test losses for each task (epoch-wise)
                 Dict[int, List[List[torch.Tensor]]]: Top-k eigenvalues for each task (batch-wise)
         """
+        self.is_permuted_mnist = isinstance(cl_dataset, PermutedMNIST)
         logging.info(f"Starting training for subspace type: {self.subspace_type}")
 
         train_losses = {i: [] for i in range(self.num_tasks)}
@@ -687,7 +713,7 @@ class CLTrainer:
         test_df = pd.DataFrame(test_data)
         eigenvalue_df = pd.DataFrame(eigenvalue_data).explode("value")
 
-        if self.calculate_next_top_k:
+        if self.calculate_overlap:
             print(f"{overlap_data=}")
             overlap_df = pd.DataFrame(overlap_data)
             print(overlap_df)
