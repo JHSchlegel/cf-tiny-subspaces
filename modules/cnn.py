@@ -13,7 +13,7 @@ import torch.nn as nn
 
 
 class CNN(nn.Module):
-    """A CNN architecture for multi-task learning with shared convolutional layers
+    """A CNN architecture for Continual Learning with shared convolutional layers
     and task-specific fully connected layers.
 
     The network architecture consists of:
