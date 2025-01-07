@@ -28,12 +28,15 @@ from utils.wandb_utils import setup_wandb
 from utils.reproducibility import set_all_seeds
 from utils.data_utils.continual_dataset import ContinualDataset
 
+
 # =========================================================================== #
 #                          Multi-task Joint Trainer                           #
 # =========================================================================== #
+
+
 class JointTrainer:
     """
-    Joint Training implementation that supports training with externally configured 
+    Joint Training implementation that supports training with externally configured
     optimizers and handles multiple tasks simultaneously. This class provides comprehensive
     training, evaluation, and metric tracking capabilities integrated with wandb logging.
     """
@@ -48,9 +51,9 @@ class JointTrainer:
         num_epochs: int,
         log_interval: int,
         eval_freq: int,
-        task_il: bool,
         checkpoint_freq: int = 10,
         seed: int = 42,
+        cl_batch_size: int = 128,
         scheduler: Optional[optim.lr_scheduler._LRScheduler] = None,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         use_wandb: bool = True,
@@ -68,11 +71,12 @@ class JointTrainer:
             num_epochs (int): Number of training epochs
             log_interval (int): Frequency of logging training metrics (in iterations)
             eval_freq (int): Frequency of evaluation (in epochs)
-            task_il (bool): Whether the problem is of type task-il
             checkpoint_freq (int): Frequency of model checkpointing (in epochs).
                 Defaults to 10.
             seed (int): Random seed for reproducibility.
                 Defaults to 42.
+            cl_batch_size (int): Batch size used for corresponding continual
+                learning dataset. Defaults to 128.
             scheduler (Optional[_LRScheduler]): Learning rate scheduler.
                 Defaults to None.
             device (str): Device to run the training on ('cuda' or 'cpu').
@@ -96,7 +100,6 @@ class JointTrainer:
         self.eval_freq = eval_freq
         self.checkpoint_freq = checkpoint_freq
         self.device = device
-        self.task_il = task_il
         self.num_tasks = num_tasks
 
         # Create directories to save checkpoints
@@ -118,6 +121,8 @@ class JointTrainer:
         # Initialize per task accuracies and losses
         self.test_accuracies = {i: [] for i in range(self.num_tasks)}
         self.test_losses = {i: [] for i in range(self.num_tasks)}
+
+        self.cl_batch_size = cl_batch_size
 
     def _train_epoch(
         self,
@@ -146,13 +151,16 @@ class JointTrainer:
             task_iterators[task_id] = iter(train_loader[task_id])
 
         # Get minimum number of batches across all tasks
-        min_batches = min(len(loader) for loader in train_loader.values())
-        
+        num_steps = sum(
+            len(loader.dataset) // self.cl_batch_size
+            for loader in train_loader.values()
+        )
+
         epoch_loss = 0.0
         correct = 0
         total = 0
 
-        pbar = tqdm(range(min_batches), desc=f"Epoch {epoch+1}/{self.num_epochs}")
+        pbar = tqdm(range(num_steps), desc=f"Epoch {epoch+1}/{self.num_epochs}")
         for batch_idx in pbar:
             self.optimizer.zero_grad()
             batch_loss = 0.0
@@ -165,14 +173,14 @@ class JointTrainer:
                     data, target = next(task_iterators[task_id])
                     data, target = data.to(self.device), target.to(self.device)
 
-                    # Forward pass 
-                    if hasattr(self.model, 'conv_layers'): 
+                    # Forward pass
+                    if hasattr(self.model, "conv_layers"):
                         features = self.model.conv_layers(data)
                         outputs = self.model.fc[task_id](features)
-                    elif hasattr(self.model, 'features'): 
+                    elif hasattr(self.model, "features"):
                         features = self.model.features(data)
                         outputs = self.model.heads[task_id](features)
-                    else: 
+                    else:
                         outputs = self.model(data)
 
                     # Compute loss and accuracy
@@ -187,7 +195,6 @@ class JointTrainer:
                 except StopIteration:
                     logging.warning(f"Task {task_id} iterator exhausted early")
                     continue
-
             # Backward pass and optimization
             batch_loss.backward()
             self.optimizer.step()
@@ -201,21 +208,23 @@ class JointTrainer:
             if batch_idx % self.log_interval == 0:
                 current_loss = batch_loss.item()
                 current_acc = 100.0 * batch_correct / batch_total
-                pbar.set_postfix({
-                    'loss': f'{current_loss:.4f}',
-                    'acc': f'{current_acc:.2f}%'
-                })
+                pbar.set_postfix(
+                    {"loss": f"{current_loss:.4f}", "acc": f"{current_acc:.2f}%"}
+                )
 
                 if wandb.run:
-                    wandb.log({
-                        'train/batch_loss': current_loss,
-                        'train/batch_accuracy': current_acc,
-                        'train/learning_rate': self.optimizer.param_groups[0]['lr']
-                    }, commit=False)
+                    wandb.log(
+                        {
+                            "train/batch_loss": current_loss,
+                            "train/batch_accuracy": current_acc,
+                            "train/learning_rate": self.optimizer.param_groups[0]["lr"],
+                        },
+                        commit=False,
+                    )
 
         # Calculate epoch statistics
         epoch_time = time.time() - start_time
-        avg_loss = epoch_loss / (min_batches * self.num_tasks)
+        avg_loss = epoch_loss / (num_steps * self.num_tasks)
         avg_accuracy = 100.0 * correct / total
 
         return avg_loss, avg_accuracy, epoch_time
@@ -249,18 +258,18 @@ class JointTrainer:
 
             test_loader = test_loaders[task_id]
             pbar = tqdm(test_loader, desc=f"Evaluating Task {task_id}")
-            
+
             for data, target in pbar:
                 data, target = data.to(self.device), target.to(self.device)
-                
+
                 # Forward pass
-                if hasattr(self.model, 'conv_layers'):  
+                if hasattr(self.model, "conv_layers"):
                     features = self.model.conv_layers(data)
                     output = self.model.fc[task_id](features)
-                elif hasattr(self.model, 'features'):  
+                elif hasattr(self.model, "features"):
                     features = self.model.features(data)
                     output = self.model.heads[task_id](features)
-                else:  
+                else:
                     output = self.model(data)
 
                 # Compute loss
@@ -275,16 +284,19 @@ class JointTrainer:
             # Calculate metrics
             avg_loss = total_loss / total
             accuracy = 100.0 * correct / total
-            
+
             accuracies[task_id] = accuracy
             losses[task_id] = avg_loss
 
             if wandb.run:
-                wandb.log({
-                    f'eval/task_{task_id}_accuracy': accuracy,
-                    f'eval/task_{task_id}_loss': avg_loss,
-                    'epoch': epoch
-                }, commit=False)
+                wandb.log(
+                    {
+                        f"eval/task_{task_id}_accuracy": accuracy,
+                        f"eval/task_{task_id}_loss": avg_loss,
+                        "epoch": epoch,
+                    },
+                    commit=False,
+                )
 
         return accuracies, losses
 
@@ -326,10 +338,10 @@ class JointTrainer:
             # Periodic evaluation
             if (epoch + 1) % self.eval_freq == 0:
                 accuracies, losses = self._evaluate_tasks(test_loaders, epoch)
-                
+
                 # Calculate average metrics
                 avg_test_accuracy = sum(accuracies.values()) / len(accuracies)
-                
+
                 # Track best model
                 if avg_test_accuracy > best_avg_accuracy:
                     best_avg_accuracy = avg_test_accuracy
@@ -364,15 +376,19 @@ class JointTrainer:
         test_data = []
         for task_id in range(self.num_tasks):
             for epoch in range(len(self.test_losses[task_id])):
-                test_data.append({
-                    'task_id': task_id,
-                    'epoch': epoch,
-                    'accuracy': self.test_accuracies[task_id][epoch],
-                    'loss': self.test_losses[task_id][epoch]
-                })
+                test_data.append(
+                    {
+                        "task_id": task_id,
+                        "epoch": epoch,
+                        "accuracy": self.test_accuracies[task_id][epoch],
+                        "loss": self.test_losses[task_id][epoch],
+                    }
+                )
 
         # Create and save DataFrame
-        pd.DataFrame(test_data).to_csv(self.save_dir / "metrics/test_metrics.csv", index=False)
+        pd.DataFrame(test_data).to_csv(
+            self.save_dir / "metrics/test_metrics.csv", index=False
+        )
 
     def _save_checkpoint(self, epoch: int, is_best: bool = False) -> None:
         """
@@ -384,24 +400,26 @@ class JointTrainer:
         """
         try:
             checkpoint = {
-                'epoch': epoch,
-                'model_state_dict': self.model.state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
-                'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
-                'test_accuracies': self.test_accuracies,
-                'test_losses': self.test_losses
+                "epoch": epoch,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "scheduler_state_dict": (
+                    self.scheduler.state_dict() if self.scheduler else None
+                ),
+                "test_accuracies": self.test_accuracies,
+                "test_losses": self.test_losses,
             }
-            
+
             # Save regular checkpoint
             save_path = self.save_dir / "models" / f"model_epoch_{epoch}.pt"
             torch.save(checkpoint, save_path)
-            
+
             # Save best model if applicable
             if is_best:
                 best_path = self.save_dir / "models" / "model_best.pt"
                 torch.save(checkpoint, best_path)
                 logging.info(f"Best model saved: {best_path}")
-            
+
             logging.info(f"Checkpoint saved: {save_path}")
         except Exception as e:
             logging.error(f"Failed to save checkpoint: {str(e)}")
@@ -416,12 +434,12 @@ class JointTrainer:
         """
         try:
             checkpoint = torch.load(checkpoint_path)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            if self.scheduler and checkpoint['scheduler_state_dict']:
-                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            self.test_accuracies = checkpoint['test_accuracies']
-            self.test_losses = checkpoint['test_losses']
+            self.model.load_state_dict(checkpoint["model_state_dict"])
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            if self.scheduler and checkpoint["scheduler_state_dict"]:
+                self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            self.test_accuracies = checkpoint["test_accuracies"]
+            self.test_losses = checkpoint["test_losses"]
             logging.info(f"Checkpoint loaded: {checkpoint_path}")
         except Exception as e:
             logging.error(f"Failed to load checkpoint: {str(e)}")
