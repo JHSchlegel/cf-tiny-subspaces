@@ -241,11 +241,12 @@ class SubspaceSGD(SGD):
         Returns:
             torch.Tensor: Projected gradient tensor
         """
+
         projected_grad = flat_grad.clone()
 
         projections = torch.mv(
-            self.eigenvectors.T,
-            torch.mv(self.eigenvectors, flat_grad)
+            self.eigenvectors[:self.k].T,
+            torch.mv(self.eigenvectors[:self.k], flat_grad)
         )
 
         if hasattr(self.model, "conv_layers"):
@@ -293,31 +294,30 @@ class SubspaceSGD(SGD):
         )
         eigenvalues, eigenvectors = lanczos(
             operator=hvp_operator,
-            num_eigenthings=2 * self.k if self.calculate_next_top_k else self.k,
+            num_eigenthings=20 if self.calculate_next_top_k else 10, # To avoid convergence issues if k is small
             use_gpu=use_gpu,
             fp16=fp16,
             max_steps=self.max_lanczos_steps,
         )
-
-        if isinstance(data_batch, (tuple, list)):
-            print(f"Data batch shape: {data_batch[0].shape}")
 
         assert is_orthonormal_basis(
             matrix=eigenvectors, device=self.device, tol=1e-4
         ), "Eigenvectors are not orthonormal"
 
         self.eigenvalues = (
-            eigenvalues[self.k :] if self.calculate_next_top_k else eigenvalues
+            eigenvalues[-self.k:] 
         )
         self.eigenvectors = (
-            eigenvectors[self.k :] if self.calculate_next_top_k else eigenvectors
+            eigenvectors[-self.k:] 
         )
 
+        assert len(self.eigenvalues)== self.k, "Number of eigenvalues does not match k"
+
         self.eigenvalues_next_top_k = (
-            eigenvalues[: self.k] if self.calculate_next_top_k else None
+            eigenvalues[-2*self.k: -self.k] if self.calculate_next_top_k else None
         )
         self.eigenvectors_next_top_k = (
-            eigenvectors[: self.k] if self.calculate_next_top_k else None
+            eigenvectors[-2*self.k: -self.k] if self.calculate_next_top_k else None
         )
 
         self.eigenvectors = torch.from_numpy(self.eigenvectors).to(self.device)
