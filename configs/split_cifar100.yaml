@@ -14,7 +14,7 @@ model:
 optimizer:
   lr: 0.001
   weight_decay: 0.0
-  k: 10
+  k: 9
   max_lanczos_steps: 100
   momentum: 0.0
   dampening: 0.0
