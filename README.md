@@ -1,10 +1,33 @@
 # Does Catastrophic Forgetting Happen in Tiny Subspaces?
-
+Catastrophic forgetting remains a significant chal-
+lenge in continual learning, where adapting to new
+tasks often disrupts previously acquired knowl-
+edge. Recent studies on neural network opti-
+mization indicate that learning in a non-continual
+framework primarily occurs within the bulk sub-
+space of the loss Hessian, which is associated
+with small eigenvalues of the latter. However, the
+role of the bulk subspace in a continual learning
+setting, particularly in relation to forgetting, is not
+well understood. In this work, we investigate how
+constraining gradient updates to either the bulk or
+dominant subspaces affects learning and forget-
+ting. Through experiments on Permuted MNIST,
+Split-CIFAR10, and Split-CIFAR100, we confirm
+that task-specific learning occurs in the bulk sub-
+space of the loss Hessian. Additionally, there
+is evidence suggesting that forgetting may also
+predominantly occur within the bulk subspace, al-
+though further large-scale experiments are needed
+to validate this. Our findings provide promis-
+ing avenues for efficient implementations of algo-
+rithms that counter catastrophic forgetting.
 ## Table of Contents
 
 1. [Contributors](#contributors)
 2. [Setup](#setup)
 3. [Source Code Structure](#source-code-structure)
+4. [Reproducibility](#reproducibility)
 
 ## Contributors
 
@@ -17,13 +40,20 @@
 
 ### Installation
 
+Clone this repository.
+```bash
+git clone git@github.com:JHSchlegel/cf-tiny-subspaces.git
+cd cf-tiny-subspaces
+```
+
+We recommend using a conda environment to install the required packages. Run the following commands to create a new environment and install the dependencies.
 ```bash
 conda create -n cf python=3.10 pip
 conda activate cf
 pip install -r requirements.txt
 ```
 
-This repository includes the "hessian_eigenthings" as a submodule; after cloning, run the following commands at the root level of the main repository.
+Moreover, this repository includes [pytorch-hessian-eigenthings](https://github.com/noahgolmant/pytorch-hessian-eigenthings/tree/master) as a submodule; after cloning, run the following commands at the root level of the `cf-tiny-subspaces` repository to initialize, update and install the submodule:
 
 ```bash
 git submodule init 
@@ -32,12 +62,11 @@ cd pytorch_hessian_eigenthings
 pip install -e .
 ```
 
-to initialize, update and install the submodule.
-
 ## Source Code Structure
+
 ```bash
 .
-├── LICENSE                    
+├── LICENSE                  
 ├── README.md
 ├── requirements.txt
 ├── reports
@@ -60,7 +89,7 @@ to initialize, update and install the submodule.
 │   └── visualizations.ipynb                # notebook for visualizations
 ├── scripts
 │   ├── ablation_study.sh                   # script to run bulk space ablations
-│   └── train.sh                            # script to run training
+│   └── train.sh                            # script to run main experiments
 ├── train
 │   ├── __init__.py
 │   ├── train_permuted_mnist.py             # train script for permuted MNIST
@@ -76,3 +105,21 @@ to initialize, update and install the submodule.
     ├── reproducibility.py                  # utilities for pytorch reproducibility
     └── wandb_utils.py                      # utilities for logging to wandb
 ```
+
+## Reproducibility
+
+The main results of our work, as summarized in `Table 1` of the report, can be reproduced by running the `scripts/train.sh` script:
+```bash
+bash scripts/train.sh
+```  
+
+The bulk space ablations can be reproduced by running the `scripts/ablation_study.sh` script:
+```bash
+bash scripts/ablation_study.sh <dataset_name>
+```
+where `<dataset_name>` is one of `cifar10`, `cifar100`, or `pmnist`.
+
+
+All visualizations included in the report were created using the `notebooks/visualizations.ipynb` notebook.
+
+Finally, the multitask oracle baseline can be reproduced by running the `notebooks/multitask_learning.ipynb` notebook.
