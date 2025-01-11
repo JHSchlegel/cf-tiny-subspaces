@@ -1,27 +1,5 @@
 # Does Catastrophic Forgetting Happen in Tiny Subspaces?
-Catastrophic forgetting remains a significant chal-
-lenge in continual learning, where adapting to new
-tasks often disrupts previously acquired knowl-
-edge. Recent studies on neural network opti-
-mization indicate that learning in a non-continual
-framework primarily occurs within the bulk sub-
-space of the loss Hessian, which is associated
-with small eigenvalues of the latter. However, the
-role of the bulk subspace in a continual learning
-setting, particularly in relation to forgetting, is not
-well understood. In this work, we investigate how
-constraining gradient updates to either the bulk or
-dominant subspaces affects learning and forget-
-ting. Through experiments on Permuted MNIST,
-Split-CIFAR10, and Split-CIFAR100, we confirm
-that task-specific learning occurs in the bulk sub-
-space of the loss Hessian. Additionally, there
-is evidence suggesting that forgetting may also
-predominantly occur within the bulk subspace, al-
-though further large-scale experiments are needed
-to validate this. Our findings provide promis-
-ing avenues for efficient implementations of algo-
-rithms that counter catastrophic forgetting.
+Catastrophic forgetting remains a significant challenge in continual learning, where adapting to new tasks often disrupts previously acquired knowledge. Recent studies on neural network optimization indicate that learning in a non-continual framework primarily occurs within the bulk subspace of the loss Hessian, which is associated with small eigenvalues of the latter. However, the role of the bulk subspace in a continual learning setting, particularly in relation to forgetting, is not well understood. In this work, we investigate how constraining gradient updates to either the bulk or dominant subspace affects learning and forgetting. Through experiments on Permuted MNIST, Split-CIFAR10, and Split-CIFAR100, we confirm that task-specific learning occurs in the bulk subspace of the loss Hessian. Additionally, there is evidence suggesting that forgetting may also predominantly occur within the bulk subspace, although further large-scale experiments are needed to validate this. Our findings provide promising avenues for efficient implementations of algorithms that counter catastrophic forgetting.
 ## Table of Contents
 
 1. [Contributors](#contributors)
